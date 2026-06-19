@@ -82,7 +82,7 @@
   <div class="big">🖼️ → 🦴 → 🌊</div>
   <div>左のパネルから画像をアップロード → AI検出 → 編集<br>すべて端末内で処理され、画像は外部送信されません</div>
 </div>
-<canvas id="gravityNeedle" width="50" height="50"></canvas>
+<canvas id="gravityNeedle" width="50" height="50" title="本体の揺れ方向(センサー接続時)"></canvas>
 <button id="viewBtn">👁 閲覧</button><button id="modeBtn" title="ツールパネルを閉じる">✕</button>
 <div id="toast"></div>
 
@@ -138,7 +138,6 @@
       <button class="tool toggled" data-tool="grab">🤚 つかむ</button>
       <button class="tool" data-tool="pull">🤏 引っ張る</button>
       <button class="tool" data-tool="pullloop">🔁 引張ループ</button>
-      <button class="tool" data-tool="tilt">🎮 傾け</button>
       <button class="tool" data-tool="mask">✂️ マスク</button>
       <button class="tool" data-tool="mark">🖌 マーキング</button>
       <button class="tool" data-tool="bone">🦴 ボーン</button>
@@ -208,7 +207,7 @@
       <input type="file" id="bgImgInput" accept="image/*">
       <span class="mini">密度</span><input type="range" id="densitySlider" min="50" max="200" value="100"><output id="densityOut" class="mini">1.0×</output>
       <button id="expandBtn">⬆ 余白+10%</button>
-      <label class="pill" style="cursor:pointer;"><input type="checkbox" id="trimMesh" checked> 透明セル除去(輪郭リアル化)</label>
+      <label class="pill" style="cursor:pointer;"><input type="checkbox" id="trimMesh"> ✂️ マスク形状で切り抜く(輪郭の外を消す)</label>
     </div>
   </div>
 
@@ -325,6 +324,7 @@ let markInfo=[
 let defs=[], layers=[];
 let engine=null, worldReady=false, running=false;
 let gBase={x:0,y:1}, gPrev={x:0,y:1};
+let lastSensorAccel={x:0,y:0}; // インジケータ表示用: 直近のセンサー揺れ方向(減衰)
 let sensorOn=false;
 let model=null, segmenter=null, poseDetector=null, posesCache=[];
 let meshDensity=1.0;
@@ -350,7 +350,7 @@ let sphSoft=0.5; // 直近・選択楕円へ反映する既定の柔らかさ
 let modelPlace=null; // {model, pointKey} モデル参照からの配置中
 let modelPlaced={};  // この配置セッションで置いた点 name->{x,y}
 
-let dragTilt=false, pull=null, grab=null;
+let pull=null, grab=null;
 let painting=false, lastPaint=null, bonePending=null;
 let drawStart=null, drawRect=null, pendingRect=null;
 const activePtrs=new Map();
@@ -448,22 +448,10 @@ async function analyze(){
       setStatus('物体検出モデルを読み込み中(初回のみ)…',false,true);
       model=await cocoSsd.load();
     }
-    // ⑦ CG/イラストモード: AI検出はアニメに効かないので、中央に編集用の枠を1つ自動配置
+    // ⑦ CG/イラストモード: AI検出はアニメに効かないため自動配置はせず、手動の➕枠追加に誘導
     if(document.getElementById('illustMode').checked){
-      const bw=imgW*0.94, bh=imgH*0.94;
-      const bx=(imgW-bw)/2, by=(imgH-bh)/2;
-      defs=[{
-        label:'キャラ', category:'person',
-        bboxPct:[bx/imgW*100,by/imgH*100,bw/imgW*100,bh/imgH*100],
-        params:Object.assign({anchored:true},PHYS_DEFAULT.person),
-        bones:[], pins:[], useMask:false, // マスクは無し(足す状態)から開始
-      }];
-      // マスクは空で開始
-      maskCanvas=document.createElement('canvas');
-      maskCanvas.width=editW; maskCanvas.height=editH;
-      refreshTintedMask();
-      buildAll();
-      setStatus('CGモード: 中央に枠を置きました。✂️マスクの🖌筆で輪郭をなぞる→🪣囲み塗りで内側を塗る、で切り出せます。枠は➕枠追加で調整可。');
+      setStatus('CGモード: 自動検出は行いません。🦴の前に、まず「➕ 枠追加」ツールでキャラを囲んでください。その後✂️マスクの🖌筆で輪郭→🪣囲み塗りで切り出せます。');
+      document.getElementById('analyzeBtn').disabled=false;
       return;
     }
     setStatus('対象物を検出中…',false,true);
@@ -1286,7 +1274,6 @@ function onDown(e){
         else setStatus('近くに矢印がありません。始点(●)か線をクリックしてください。',true);
       }else pullLoopDraw={ax:w.x,ay:w.y,bx:w.x,by:w.y};
       break;
-    case 'tilt':if(!sensorOn){dragTilt=true;setTiltFromPointer(e);}break;
     case 'mask':
       ensureMaskCv(); pushUndo('mask');
       if(maskTool==='bucket'){
@@ -1337,7 +1324,6 @@ function onMove(e){
   const t=effTool();
   switch(t){
     case 'pull':case 'viewGesture':if(pull){pull.con.pointA=w;}break;
-    case 'tilt':if(dragTilt)setTiltFromPointer(e);break;
     case 'mask':if(painting){paintMask(lastPaint,w);lastPaint=w;}break;
     case 'mark':if(painting){paintMark(lastPaint,w);lastPaint=w;}break;
     case 'addbox':
@@ -1350,7 +1336,6 @@ function onMove(e){
 function onUp(e){
   activePtrs.delete(e.pointerId);
   if(activePtrs.size<2)pinch=null;
-  if(dragTilt){dragTilt=false;gBase={x:0,y:1};}
   if(pull){Composite.remove(engine.world,pull.con);pull=null;}
   poseDrag=null;
   if(sphereDraw){
@@ -1391,7 +1376,6 @@ function onUp(e){
   }
 }
 function cancelOps(){
-  dragTilt=false;
   poseDrag=null;
   boneDrag=null;
   pullLoopDraw=null;
@@ -1401,10 +1385,6 @@ function cancelOps(){
   grab=null;
   if(painting){painting=false;lastPaint=null;undoStack.pop();}
   drawStart=null;drawRect=null;
-}
-function setTiltFromPointer(e){
-  gBase.x=((e.clientX)/window.innerWidth-.5)*3;
-  gBase.y=((e.clientY)/window.innerHeight-.5)*3+.5;
 }
 
 /* ====== つかむ ====== */
@@ -1616,7 +1596,8 @@ function ensureMaskCv(){
     const mc=maskCanvas.getContext('2d');
     mc.fillStyle='#fff';mc.fillRect(0,0,editW,editH);
     refreshTintedMask();
-    defs.forEach(d=>{if(d.category==='person')d.useMask=true;});
+    // マスクは全レイヤー共有の1枚。person以外(手動枠のobject等)も含め全レイヤーで使えるようにする
+    defs.forEach(d=>{d.useMask=true;});
   }
 }
 function brushSize(id){return +document.getElementById(id).value;}
@@ -1844,25 +1825,28 @@ document.getElementById('sensorBtn').addEventListener('click',async()=>{
     sensorOn=true;
     const pill=document.getElementById('sensorPill');
     pill.textContent='接続中';pill.classList.add('on');
-    setStatus('センサー連動を開始しました。');
+    setStatus('センサー連動を開始しました。本体を揺らすと、つかんで動かしたのと同じように柔らかく揺れます。');
   }catch(e){
     setStatus('この環境ではセンサーを使えません(https必須)。',true);
   }
 });
 let lastShakeT=0;
+let sensorVel={x:0,y:0}; // センサー加速度をなめらかに均した値(ボーンが暴れて埋まるのを防ぐ)
+const SENSOR_K = 8000; // m/s² → applyInertia入力スケール。実測検証済み: 🤚つかむ操作と同等以上の揺れ幅になる値
 function onMotion(e){
-  const g=e.accelerationIncludingGravity;
-  if(g&&g.x!==null){
-    gBase.x=clampN(-g.x/9.8,-1.5,1.5);
-    gBase.y=clampN(g.y/9.8,-1.5,1.5);
-  }
+  // 傾き(accelerationIncludingGravity)は使わない: 「つかんで動かす」と同じ、
+  // 重力を除いた純粋な動きの加速度(acceleration)を直接、慣性力としてメッシュに伝える。
   const a=e.acceleration;
   if(a&&a.x!==null){
-    const mag=Math.hypot(a.x,a.y,a.z);
-    if(mag>12&&performance.now()-lastShakeT>250){
-      lastShakeT=performance.now();
-      impulse(Math.min(mag/12,3));
-    }
+    // ローパスフィルタで滑らかにし、急激なスパイクでボーンが貫通(埋まる)するのを抑える
+    const smooth=0.35;
+    sensorVel.x += (a.x-sensorVel.x)*smooth;
+    sensorVel.y += (a.y-sensorVel.y)*smooth;
+    // 画面の向きに合わせて x→横, y→縦(スマホの座標系をcanvasの座標系へ)
+    const ax=clampN(sensorVel.x*SENSOR_K, -6000, 6000); // applyInertia本体のクランプと揃える
+    const ay=clampN(-sensorVel.y*SENSOR_K, -6000, 6000);
+    applyInertia(ax,ay); // 🤚つかむ/引っ張ると同じ経路でメッシュを揺らす(柔らかい挙動)
+    lastSensorAccel={x:sensorVel.x,y:-sensorVel.y}; // インジケータ表示用(本体の揺れ方向)
   }
 }
 function clampN(v,a,b){return Math.min(b,Math.max(a,v));}
@@ -1918,11 +1902,12 @@ chooser.querySelectorAll('button').forEach(btn=>{
       params:Object.assign({anchored:true},PHYS_DEFAULT[cat]),
       bones:pose?boneSegments(pose).segs:[],
       pins:pose?boneSegments(pose).pins:[],
-      useMask:cat==='person'&&!!maskCanvas,
+      spheres:[],
+      useMask:!!maskCanvas, // 既にマスク編集が始まっていれば、新しい枠も対象に含める
     };
     defs.push(def);
-    buildLayer(def);
-      setStatus('「'+CAT_LABEL[cat]+'」を追加しました。');
+    buildAll(); // 他レイヤーとの整合性を保つため全体を再構築(buildLayer単体呼びは不整合の原因だった)
+      setStatus('「'+CAT_LABEL[cat]+'」を追加しました。✂️マスクの🖌筆で輪郭→🪣囲み塗りで切り出してください。(マスクは全レイヤー共通なので、複数キャラを別々に切り出す場合は1体ずつ進めるのが安定します)');
     hideChooser();
   });
 });
@@ -2156,9 +2141,11 @@ function loop(t){
 function drawNeedle(){
   nctx.clearRect(0,0,50,50);
   nctx.strokeStyle='#2A3350';nctx.beginPath();nctx.arc(25,25,20,0,7);nctx.stroke();
-  const m=Math.min(Math.hypot(gBase.x,gBase.y),1.6);
-  const a=Math.atan2(gBase.y,gBase.x);
-  nctx.strokeStyle='#6EE7D8';nctx.lineWidth=3;nctx.beginPath();
+  // 本体の揺れ方向(センサー入力)を表示。動かしていない間は自然に減衰して中心へ戻る
+  lastSensorAccel.x*=0.90; lastSensorAccel.y*=0.90;
+  const m=Math.min(Math.hypot(lastSensorAccel.x,lastSensorAccel.y)*1.2,1.6);
+  const a=Math.atan2(lastSensorAccel.y,lastSensorAccel.x);
+  nctx.strokeStyle=sensorOn?'#6EE7D8':'#5A6488';nctx.lineWidth=3;nctx.beginPath();
   nctx.moveTo(25,25);nctx.lineTo(25+Math.cos(a)*13*m,25+Math.sin(a)*13*m);nctx.stroke();
   nctx.lineWidth=1;
 }
