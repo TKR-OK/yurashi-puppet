@@ -1,0 +1,2777 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ゆらしフォト・スタジオ v4</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.2/dist/body-segmentation.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<style>
+  :root{
+    --panel:#161C2Eee; --panel-2:#1D2438; --line:#2A3350;
+    --ink:#E8ECF8; --ink-dim:#8B94B0; --mint:#6EE7D8; --rose:#FF7A9E;
+  }
+  *{box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent;}
+  html,body{height:100%; overflow:hidden; background:#0E1220; font-family:'Zen Kaku Gothic New',sans-serif; color:var(--ink);}
+  #stage{position:fixed; inset:0; display:block; touch-action:none;}
+  #stageHint{position:fixed; inset:0; display:flex; flex-direction:column; gap:10px; align-items:center; justify-content:center; color:var(--ink-dim); font-size:13px; text-align:center; padding:20px; pointer-events:none;}
+  #stageHint .big{font-size:44px;}
+  #gravityNeedle{position:fixed; right:12px; bottom:12px; width:50px; height:50px; border-radius:50%; background:rgba(14,18,32,.7); border:1px solid var(--line); display:none; z-index:8;}
+  #modeBtn{position:fixed; right:14px; top:14px; z-index:40; font-size:22px; width:52px; height:52px; padding:0; border-radius:14px; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 16px rgba(0,0,0,.4);}
+  #viewBtn{position:fixed; right:74px; top:14px; z-index:40; font-size:14px; height:52px; padding:0 14px; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,.4);}
+  #viewBtn.viewing{background:var(--mint); color:#0E1220;}
+  #modeBtn.closed{opacity:.45; background:var(--panel-2);}
+  #modeBtn.closed:hover, #modeBtn.closed:active{opacity:1;}
+  #toast{position:fixed; left:50%; bottom:18px; transform:translateX(-50%); background:var(--panel); border:1px solid var(--line); border-radius:99px; padding:8px 18px; font-size:12px; color:var(--ink-dim); z-index:30; max-width:88vw; display:none;}
+  #toast.err{color:var(--rose); border-color:var(--rose);}
+  #panel{position:fixed; left:10px; top:10px; bottom:10px; width:min(360px,92vw);
+    background:var(--panel); backdrop-filter:blur(8px); border:1px solid var(--line); border-radius:16px;
+    padding:12px; padding-top:60px; overflow-y:auto; z-index:15; display:flex; flex-direction:column; gap:10px;}
+  .card{background:#10162488; border:1px solid var(--line); border-radius:12px; padding:10px;}
+  .card h2{font-size:11px; font-weight:700; color:var(--ink-dim); letter-spacing:.12em; margin-bottom:7px; cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px;}
+  .card h2::before{content:'▾'; font-size:9px; transition:transform .15s; color:var(--mint);}
+  .card.collapsed h2::before{transform:rotate(-90deg);}
+  .card.collapsed h2{margin-bottom:0;}
+  .card.collapsed > *:not(h2){display:none !important;}
+  .row{display:flex; gap:5px; flex-wrap:wrap; align-items:center;}
+  button, label.btn{font-family:inherit; font-size:12px; font-weight:700; background:var(--panel-2); color:var(--ink); border:1px solid var(--line); border-radius:9px; padding:7px 10px; cursor:pointer;}
+  button:active, label.btn:active{transform:scale(.97);}
+  button.primary, label.btn.primary{background:var(--mint); color:#06201C; border-color:var(--mint);}
+  button.toggled{background:var(--mint); color:#06201C; border-color:var(--mint);}
+  button.warn{color:var(--rose);}
+  button:disabled{opacity:.4;}
+  button.rngx{font-size:9px; padding:3px 5px; font-family:'Space Grotesk';}
+  input[type=file]{display:none;}
+  select{font-family:inherit; font-size:12px; background:var(--panel-2); color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:6px 8px;}
+  input[type=color]{width:34px; height:28px; border:1px solid var(--line); border-radius:6px; background:none; padding:1px;}
+  .pill{font-size:10px; border:1px solid var(--line); border-radius:99px; padding:3px 9px; color:var(--ink-dim);}
+  .pill.on{color:var(--mint); border-color:var(--mint);}
+  .mini{font-size:11px; color:var(--ink-dim);}
+  .subbar{display:none; gap:5px; flex-wrap:wrap; align-items:center; margin-top:7px; padding-top:7px; border-top:1px dashed var(--line); font-size:11px; color:var(--ink-dim);}
+  .subbar.show{display:flex;}
+  input[type=range]{-webkit-appearance:none; height:4px; border-radius:4px; background:var(--line); outline:none; width:100px;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none; width:17px; height:17px; border-radius:50%; background:var(--mint); border:2px solid #0E1220;}
+  .slider-line{display:grid; grid-template-columns:72px 1fr 26px 40px; gap:5px; align-items:center; margin-top:5px;}
+  .slider-line label{font-size:11px; color:var(--ink-dim);}
+  .slider-line output{font-family:'Space Grotesk'; font-size:11px; text-align:right;}
+  .slider-line input[type=range]{width:100%;}
+  .obj{background:var(--panel-2); border:1px solid var(--line); border-left:4px solid var(--c,var(--mint)); border-radius:10px; padding:9px; margin-top:8px;}
+  .obj .head{display:flex; justify-content:space-between; gap:6px; margin-bottom:4px;}
+  .obj .name{font-weight:700; font-size:12px;}
+  .obj .cat{font-size:9px; color:var(--ink-dim); text-align:right;}
+  .obj .foot{display:flex; gap:5px; margin-top:7px; flex-wrap:wrap;}
+  .obj .foot button{font-size:10px; padding:4px 7px;}
+  .obj .slider-line input[type=range]::-webkit-slider-thumb{background:var(--c,var(--mint));}
+  .chip{display:inline-block; width:10px; height:10px; border-radius:3px; vertical-align:-1px; margin-right:4px;}
+  #catChooser{position:fixed; display:none; background:var(--panel); border:1px solid var(--mint); border-radius:12px; padding:10px; z-index:25; box-shadow:0 8px 30px rgba(0,0,0,.5);}
+  #catChooser p{font-size:12px; color:var(--ink-dim); margin-bottom:8px;}
+  #catChooser .grid{display:grid; grid-template-columns:repeat(2,1fr); gap:6px;}
+  .spinner{display:inline-block; width:11px; height:11px; border:2px solid var(--line); border-top-color:var(--mint); border-radius:50%; animation:spin .8s linear infinite; vertical-align:-2px; margin-right:5px;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  @media (prefers-reduced-motion: reduce){ .spinner{animation-duration:2s;} }
+</style>
+</head>
+<body>
+<canvas id="stage"></canvas>
+<div id="stageHint">
+  <div class="big">🖼️ → 🦴 → 🌊</div>
+  <div>左のパネルから画像をアップロード → AI検出 → 編集<br>すべて端末内で処理され、画像は外部送信されません</div>
+</div>
+<canvas id="gravityNeedle" width="50" height="50"></canvas>
+<button id="viewBtn">👁 閲覧</button><button id="modeBtn" title="ツールパネルを閉じる">✕</button>
+<div id="toast"></div>
+
+<div id="modelWin" style="position:fixed; display:none; right:12px; top:60px; width:240px; background:var(--panel); border:1px solid var(--mint); border-radius:14px; padding:12px; z-index:26; box-shadow:0 8px 30px rgba(0,0,0,.5);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+    <strong style="font-size:12px;">骨格モデル参照</strong>
+    <button id="modelClose" style="padding:3px 7px;font-size:11px;">✕</button>
+  </div>
+  <select id="modelSel" style="width:100%;margin-bottom:6px;">
+    <option value="human">🧍 二足歩行(人間)</option>
+    <option value="quad">🐕 四足歩行(動物)</option>
+    <option value="stick">📏 二点の棒</option>
+    <option value="bird">🦅 鳥(翼)</option>
+  </select>
+  <canvas id="modelCanvas" width="216" height="180" style="width:100%;background:#070A14;border-radius:8px;border:1px solid var(--line);touch-action:none;"></canvas>
+  <p class="mini" id="modelHint" style="margin-top:6px;">作用点をクリック→画像上をクリックで配置。連続配置でつなげると骨ができます。</p>
+  <div class="row" style="margin-top:6px;">
+    <span class="mini" id="modelSelName">選択中: なし</span>
+    <button id="modelReset" style="font-size:11px;padding:4px 7px;margin-left:auto;">配置リセット</button>
+  </div>
+</div>
+<div id="catChooser">
+  <p>この枠の種類を選んでください</p>
+  <div class="grid">
+    <button data-cat="person">🧍 人物</button><button data-cat="animal">🐕 動物</button>
+    <button data-cat="building">🏢 建物</button><button data-cat="structure">🌉 構造物</button>
+    <button data-cat="object">📦 物体</button><button data-cat="plant">🌿 植物</button>
+    <button data-cat="vehicle">🚗 乗り物</button><button data-cat="cancel" style="color:var(--rose);">✕ キャンセル</button>
+  </div>
+</div>
+
+<div id="panel">
+  <div class="card">
+    <h2>ファイル / AI</h2>
+    <div class="row">
+      <label class="btn primary" for="fileInput">🖼 画像</label>
+      <input type="file" id="fileInput" accept="image/*">
+      <button id="analyzeBtn" disabled>🤖 AI検出</button>
+      <button id="undoBtn" disabled>↩ 戻す</button>
+      <button id="resetBtn" disabled>↺ リセット</button>
+      <button id="saveBtn" disabled>💾 保存</button>
+      <label class="btn" for="projInput">📂 読込</label>
+      <input type="file" id="projInput" accept=".json,application/json">
+      <button id="sensorBtn" disabled>📡 センサー</button>
+      <span class="pill" id="sensorPill">未接続</span>
+      <label class="pill" style="cursor:pointer;"><input type="checkbox" id="illustMode"> イラスト(低閾値検出)/CGモード</label>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>ツール</h2>
+    <div class="row">
+      <button class="tool toggled" data-tool="grab">🤚 つかむ</button>
+      <button class="tool" data-tool="pull">🤏 引っ張る</button>
+      <button class="tool" data-tool="pullloop">🔁 引張ループ</button>
+      <button class="tool" data-tool="tilt">🎮 傾け</button>
+      <button class="tool" data-tool="mask">✂️ マスク</button>
+      <button class="tool" data-tool="mark">🖌 マーキング</button>
+      <button class="tool" data-tool="bone">🦴 ボーン</button>
+      <button class="tool" data-tool="addbox">➕ 枠追加</button>
+    </div>
+    <div class="subbar show" id="sub-grab">ドラッグ=画像移動(加速度で中身が揺れる) / ピンチ・ホイール=拡縮 <button id="zoomReset">表示リセット</button></div>
+    <div class="subbar" id="sub-pullloop">
+      始点から終点へドラッグで矢印を作成→その往復を自動ループ。
+      <button id="pullLoopDelMode">🗑 矢印削除</button><button id="pullLoopClear">全消去</button>
+      周期<input type="range" id="pullLoopPeriod" min="3" max="25" value="10"><output id="pullLoopPeriodOut">1.0秒</output>
+      <button id="pullLoopPause">⏸ 一時停止</button>
+      <div class="slider-line"><label>位置</label><input type="range" id="pullLoopTimeline" min="0" max="1000" value="0"><span></span><output id="pullLoopTimelineOut">0%</output></div>
+      <span class="mini">「位置」をドラッグして好きなタイミングで止め、その状態で矢印を配置すると、配置した瞬間が動作開始になります。</span>
+    </div>
+    <div class="subbar" id="sub-mask">
+      <button id="maskBrushMode" class="toggled">🖌 筆</button><button id="maskBucket">🪣 囲み塗り</button><button id="maskWand">✨ 色で選択</button>
+      <button id="maskAdd" class="toggled">＋足す</button><button id="maskErase">－消す</button>
+      ブラシ<input type="range" id="maskBrush" min="6" max="140" value="40">
+      許容<input type="range" id="maskTol" min="5" max="120" value="40" title="色の許容度(色で選択)">
+      <button id="maskAll">全面</button><button id="maskClear">全消</button><button id="maskSmooth">〰 なめらか</button>
+    </div>
+    <div class="subbar" id="sub-mark">
+      <select id="markSel">
+        <option value="0">🟥 A 土台(硬い)</option><option value="1">🟧 B 可動部品(柔)</option><option value="2">🟪 C 揺れ反転</option>
+      </select>
+      <button id="markAdd" class="toggled">吹く</button><button id="markErase">消す</button>
+      ブラシ<input type="range" id="markBrush" min="10" max="160" value="50">
+      濃さ<input type="range" id="markOpacity" min="5" max="100" value="35"><output id="markOpacityOut" class="mini">0.35</output>
+      <span class="mini">重ね塗りで濃く</span>
+    </div>
+    <div class="subbar" id="sub-bone">
+      <button id="boneMove" class="toggled">✋ 点を動かす</button><button id="boneAdd">➕ 骨を足す</button><button id="boneSphere">⚫ 楕円を置く</button><button id="boneDel">🗑 削除</button><button id="bonePin">📌 固定</button>
+      <button id="boneModel">📖 モデル参照</button>
+      <span class="mini" id="boneHint">骨の端点(丸)をドラッグで移動。固定点は赤。</span>
+    </div>
+    <div class="subbar" id="sub-addbox">ドラッグで枠を描く → 種類を選択</div>
+  </div>
+
+  <div class="card" id="sphereCard">
+    <h2>楕円ボーン(点ボーンに連動して動く範囲)</h2>
+    <p class="mini">🦴ツールの「⚫ 楕円を置く」でドラッグ→楕円を配置。楕円は近くの<b>点ボーン</b>に連動し、引っ張り・ループ・ポーズでその点が動くと楕円内のマスクも一緒に動きます。中心ほど大きく、縁ほど柔らかく動きます。</p>
+    <div class="slider-line"><label>柔らかさ</label><input type="range" id="sphSoft" min="0" max="100" value="50"><span></span><output id="sphSoftOut">中間</output></div>
+    <div class="slider-line"><label>横幅</label><input type="range" id="sphRX" min="10" max="400" value="60"><span></span><output id="sphRXOut">60</output></div>
+    <div class="slider-line"><label>縦幅</label><input type="range" id="sphRY" min="10" max="400" value="60"><span></span><output id="sphRYOut">60</output></div>
+    <div class="slider-line"><label>角度</label><input type="range" id="sphRot" min="0" max="180" value="0"><span></span><output id="sphRotOut">0°</output></div>
+    <p class="mini" id="sphStyleHint">柔らかさ: 左=硬く追従 / 右=ゆったり追従。まず🦴で点ボーンを置き、その上に楕円を重ねるのがコツです。</p>
+  </div>
+
+
+  <div class="card collapsed" id="dispCard">
+    <h2>表示</h2>
+    <div class="row">
+      <label class="pill" style="cursor:pointer;"><input type="checkbox" id="dbgMesh"> メッシュ/骨格</label>
+      <label class="pill" style="cursor:pointer;"><input type="checkbox" id="dbgConfirm"> 確認(切出/マーク透過)</label>
+    </div>
+    <div class="row" style="margin-top:6px;">
+      <span class="mini">背景:</span>
+      <select id="bgMode">
+        <option value="dark">暗転</option>
+        <option value="bright">元の明るさ</option>
+        <option value="none">透過削除</option>
+        <option value="clean">人物除去(簡易)</option>
+        <option value="custom">カスタム画像</option>
+      </select>
+      <span class="mini">色</span><input type="color" id="bgColor" value="#0E1220">
+      <label class="btn" for="bgImgInput" style="font-size:11px;padding:5px 8px;">🖼 背景画像</label>
+      <input type="file" id="bgImgInput" accept="image/*">
+      <span class="mini">密度</span><input type="range" id="densitySlider" min="50" max="200" value="100"><output id="densityOut" class="mini">1.0×</output>
+      <button id="expandBtn">⬆ 余白+10%</button>
+      <label class="pill" style="cursor:pointer;"><input type="checkbox" id="trimMesh" checked> 透明セル除去(輪郭リアル化)</label>
+    </div>
+  </div>
+
+  <div class="card collapsed" id="autoCard">
+    <h2>自動揺れ(自動つかみ移動)</h2>
+    <div class="row">
+      <button id="autoToggle">▶ 開始</button>
+      <select id="autoPattern">
+        <option value="vert">⬆⬇ 縦</option>
+        <option value="sway">⬅➡ 横</option>
+        <option value="circle">🔄 円</option>
+        <option value="fig8">∞ 8の字</option>
+        <option value="quake">🌋 ランダム</option>
+      </select>
+    </div>
+    <div class="slider-line"><label>距離</label><input type="range" id="autoDist" min="5" max="100" value="45"><button class="rngx" id="autoDistX">×1</button><output id="autoDistOut">45px</output></div>
+    <div class="slider-line"><label>速さ(周期)</label><input type="range" id="autoPeriod" min="3" max="25" value="10"><span></span><output id="autoPeriodOut">1.0秒</output></div>
+    <div class="row" style="margin-top:6px;"><label class="pill" style="cursor:pointer;"><input type="checkbox" id="autoZoomOn"> 🔍 自動拡大縮小(遠近)</label></div>
+    <div class="slider-line"><label>遠近の幅</label><input type="range" id="autoZoomAmt" min="2" max="40" value="12"><span></span><output id="autoZoomAmtOut">12%</output></div>
+    <div class="slider-line"><label>遠近の速さ</label><input type="range" id="autoZoomPeriod" min="3" max="25" value="14"><span></span><output id="autoZoomPeriodOut">1.4秒</output></div>
+  </div>
+
+  <div class="card collapsed" id="poseCard">
+    <h2>ポーズアニメ(ループ)</h2>
+    <div class="row">
+      <button id="poseEdit">⏸ ポーズ編集</button>
+      <button id="poseA">🅰 開始記録</button>
+      <button id="poseB">🅱 中間記録</button>
+      <button id="poseRecallA">🅰 呼戻</button>
+      <button id="poseRecallB">🅱 呼戻</button>
+      <button id="poseLoop">▶ ループ再生</button>
+    </div>
+    <div class="slider-line"><label>周期</label><input type="range" id="animPeriod" min="3" max="40" value="12"><span></span><output id="animPeriodOut">1.2秒</output></div>
+    <p class="mini">🤏引っ張るでポーズを作り🅰🅱を記録 → A↔B往復ループ。走り・剣振りの素体に。</p>
+  </div>
+
+  <div class="card collapsed" id="markCard">
+    <h2>マーキング効果(濃度に応じて適用)</h2>
+    <div id="markList"></div>
+  </div>
+
+  <div class="card" id="objCard" style="display:none;">
+    <h2>対象物パラメータ</h2>
+    <div id="objList"></div>
+  </div>
+
+  <p class="mini" id="status" style="padding:0 2px;"></p>
+</div>
+<!--PANELEND-->
+
+<script>
+const { Engine, Bodies, Body, Composite, Constraint, Events } = Matter;
+
+/* ================= 定数 ================= */
+const COLORS = ['#6EE7D8','#FFB454','#FF7A9E','#A78BFA','#67B7FF','#B5E853','#F97316','#22D3EE'];
+const CAT_LABEL = {person:'人物', animal:'動物', building:'建物', structure:'構造物', plant:'植物', vehicle:'乗り物', object:'物体'};
+const CLASS_MAP = {
+  'person':{cat:'person',jp:'人物'},
+  'cat':{cat:'animal',jp:'ネコ'},'dog':{cat:'animal',jp:'イヌ'},'bird':{cat:'animal',jp:'鳥'},
+  'horse':{cat:'animal',jp:'ウマ'},'sheep':{cat:'animal',jp:'ヒツジ'},'cow':{cat:'animal',jp:'ウシ'},
+  'elephant':{cat:'animal',jp:'ゾウ'},'bear':{cat:'animal',jp:'クマ'},'zebra':{cat:'animal',jp:'シマウマ'},'giraffe':{cat:'animal',jp:'キリン'},
+  'car':{cat:'vehicle',jp:'車'},'bus':{cat:'vehicle',jp:'バス'},'truck':{cat:'vehicle',jp:'トラック'},
+  'train':{cat:'vehicle',jp:'電車'},'motorcycle':{cat:'vehicle',jp:'バイク'},'bicycle':{cat:'vehicle',jp:'自転車'},
+  'boat':{cat:'vehicle',jp:'ボート'},'airplane':{cat:'vehicle',jp:'飛行機'},
+  'potted plant':{cat:'plant',jp:'鉢植え'},
+  'chair':{cat:'object',jp:'椅子'},'couch':{cat:'object',jp:'ソファ'},'bed':{cat:'object',jp:'ベッド'},
+  'dining table':{cat:'object',jp:'テーブル'},'tv':{cat:'object',jp:'テレビ'},'laptop':{cat:'object',jp:'ノートPC'},
+  'bottle':{cat:'object',jp:'ボトル'},'cup':{cat:'object',jp:'カップ'},'umbrella':{cat:'object',jp:'傘'},
+  'backpack':{cat:'object',jp:'リュック'},'teddy bear':{cat:'object',jp:'ぬいぐるみ'},
+  'sports ball':{cat:'object',jp:'ボール'},'refrigerator':{cat:'object',jp:'冷蔵庫'},'book':{cat:'object',jp:'本'},
+  'cell phone':{cat:'object',jp:'スマホ'},'keyboard':{cat:'object',jp:'キーボード'},'vase':{cat:'object',jp:'花瓶'},
+};
+const PHYS_DEFAULT = {
+  person:   {stiffness:.35, gravityScale:.55, density:.50, restitution:.20, jointStiff:.35, depthSway:.5},
+  animal:   {stiffness:.30, gravityScale:.50, density:.45, restitution:.30, jointStiff:.35, depthSway:.6},
+  building: {stiffness:.92, gravityScale:.90, density:.95, restitution:.05, jointStiff:.9,  depthSway:.05},
+  structure:{stiffness:.85, gravityScale:.85, density:.90, restitution:.10, jointStiff:.8,  depthSway:.1},
+  vehicle:  {stiffness:.75, gravityScale:.80, density:.85, restitution:.35, jointStiff:.8,  depthSway:.15},
+  plant:    {stiffness:.15, gravityScale:.40, density:.30, restitution:.20, jointStiff:.15, depthSway:.7},
+  object:   {stiffness:.60, gravityScale:.70, density:.60, restitution:.40, jointStiff:.6,  depthSway:.3},
+};
+const BONE_PAIRS = [
+  ['left_shoulder','right_shoulder'],['left_hip','right_hip'],
+  ['left_shoulder','left_hip'],['right_shoulder','right_hip'],
+  ['left_shoulder','left_elbow'],['left_elbow','left_wrist'],
+  ['right_shoulder','right_elbow'],['right_elbow','right_wrist'],
+  ['left_hip','left_knee'],['left_knee','left_ankle'],
+  ['right_hip','right_knee'],['right_knee','right_ankle'],
+];
+const MARK_COLORS = ['#FF5577','#FFB454','#A78BFA'];
+const MARK_NAMES = ['A(硬く重く)','B(大きく揺らす)','C(自由)'];
+const EDIT_RES = 1280;
+const INERTIA_K = 1.3e-6;
+
+/* ================= DOM/状態 ================= */
+const stage=document.getElementById('stage');
+const ctx=stage.getContext('2d');
+const toast=document.getElementById('toast');
+const statusEl=document.getElementById('status');
+const needle=document.getElementById('gravityNeedle');
+const nctx=needle.getContext('2d');
+const chooser=document.getElementById('catChooser');
+const panel=document.getElementById('panel');
+
+let srcImg=null, imgW=0, imgH=0, worldK=1, worldW=0, worldH=0;
+let editW=0, editH=0;
+let maskCanvas=null, tintedMask=null;
+let markCv=[null,null,null], markData=[null,null,null];
+let markInfo=[
+  {stiffMult:2.4, massMult:1.6, swayMult:0.6},
+  {stiffMult:0.30, massMult:0.5, swayMult:3.2},
+  {stiffMult:1.0, massMult:1.0, swayMult:1.2},
+];
+let defs=[], layers=[];
+let engine=null, worldReady=false, running=false;
+let gBase={x:0,y:1}, gPrev={x:0,y:1};
+let sensorOn=false;
+let model=null, segmenter=null, poseDetector=null, posesCache=[];
+let meshDensity=1.0;
+let appMode='edit', tool='grab';
+let view={s:1,x:0,y:0};
+let undoStack=[];
+let auto={on:false, pattern:'vert', dist:45, period:1.0};
+let autoZoom={on:false, amt:0.12, period:1.4, scale:1};
+let pullLoops=[]; // {ax,ay,bx,by,body,offsetX,offsetY,con} ワールド座標で保持
+let pullLoopDraw=null; // 作成中 {ax,ay,bx,by}
+let pullLoopPeriod=1.0, pullLoopsPaused=false, pullLoopDelMode=false;
+let pullTimelineSec=0; // 引っ張りループの仮想時刻(秒)。スクラブ中はここで固定。
+let pullTimelineScrub=false; // true=スライダーで手動固定中(自動進行を止める)
+let autoOff={x:0,y:0}, autoPrev1={x:0,y:0}, autoPrev2={x:0,y:0}, quakeTarget={x:0,y:0}, quakeT=0;
+let bgMode='dark', bgColor='#0E1220';
+let inertiaPulse=0;  // 直近の揺さぶり強度(奥行き揺れの駆動源)
+let lastInertia={x:0,y:0}; // 球の揺れ駆動用(加速度の符号付き蓄積)
+let baseW=0, baseH=0, expandN=0;
+let anim={on:false, period:1.2, t0:0};
+let physPaused=false, poseDrag=null, boneDrag=null, bgImage=null, bgClean=null, bgCleanDirty=true;
+let sphereDraw=null, sphereDrag=null, selSphere=null; // 楕円の作成/移動/選択
+let sphSoft=0.5; // 直近・選択楕円へ反映する既定の柔らかさ
+let modelPlace=null; // {model, pointKey} モデル参照からの配置中
+let modelPlaced={};  // この配置セッションで置いた点 name->{x,y}
+
+let dragTilt=false, pull=null, grab=null;
+let painting=false, lastPaint=null, bonePending=null;
+let drawStart=null, drawRect=null, pendingRect=null;
+const activePtrs=new Map();
+let pinch=null, hoverPt=null, toastTimer=null;
+
+function setStatus(msg,isErr=false,spin=false){
+  statusEl.innerHTML=(spin?'<span class="spinner"></span>':'')+msg;
+  statusEl.style.color=isErr?'var(--rose)':'';
+  toast.textContent=msg;
+  toast.className=isErr?'err':'';
+  toast.style.display='block';
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>toast.style.display='none',3500);
+}
+
+/* ====== 調整係数 ====== */
+function gridK(s){ return Math.min(.95, 0.35 + s*0.55); }
+function homeK(s){ return 0.0012 + Math.pow(Math.min(s,4),2)*0.05; }
+function jointKf(j){ return Math.min(.95, 0.002 + j*j*0.25); }
+function boneMult(dist, ref){
+  const t=Math.min(Math.max(dist/ref,0),1);
+  return 1.6 - t*1.05;
+}
+
+/* ================= 座標 ================= */
+function winW(){ return stage.width; }
+function winH(){ return stage.height; }
+function offX(){ return view.x + autoOff.x*view.s; }
+function offY(){ return view.y + autoOff.y*view.s; }
+// 自動拡縮(autoZoom)を含めた実効スケール/オフセット(描画と入力座標を必ず一致させる)
+function effScale(){ return view.s*(autoZoom.scale||1); }
+function effOffX(){ const z=autoZoom.scale||1, cx=winW()/2; return cx+(offX()-cx)*z; }
+function effOffY(){ const z=autoZoom.scale||1, cy=winH()/2; return cy+(offY()-cy)*z; }
+function canvasPt(e){
+  const r=stage.getBoundingClientRect();
+  return {x:(e.clientX-r.left)/r.width*stage.width, y:(e.clientY-r.top)/r.height*stage.height};
+}
+function toWorld(p){ return {x:(p.x-effOffX())/effScale(), y:(p.y-effOffY())/effScale()}; }
+function worldOf(e){ return toWorld(canvasPt(e)); }
+function worldToEdit(p){ return {x:p.x/worldW*editW, y:p.y/worldH*editH}; }
+function imgToWorld(p){ return {x:p.x*worldK, y:p.y*worldK}; }
+function worldToImgPt(p){ return {x:p.x/worldK, y:p.y/worldK}; }
+function clampView(){
+  const W=winW(), H=winH();
+  view.s=Math.min(8,Math.max(.3,view.s));
+  view.x=Math.min(W*0.85, Math.max(W*0.15-worldW*view.s, view.x));
+  view.y=Math.min(H*0.85, Math.max(H*0.15-worldH*view.s, view.y));
+}
+function fitView(){ view.s=1; view.x=(winW()-worldW)/2; view.y=(winH()-worldH)/2; }
+function resizeCanvas(){
+  stage.width=window.innerWidth; stage.height=window.innerHeight;
+  if(worldW) clampView();
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+/* ================= 画像 ================= */
+document.getElementById('fileInput').addEventListener('change', e=>{
+  const file=e.target.files[0];
+  if(!file) return;
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=()=>{ initImage(img); URL.revokeObjectURL(url); };
+  img.src=url;
+});
+function initImage(img){
+  srcImg=img; imgW=img.width; imgH=img.height;
+  baseW=imgW; baseH=imgH; expandN=0;
+  srcEditCache=null;
+  worldK=Math.min((winW()-40)/imgW,(winH()-40)/imgH,1);
+  worldW=imgW*worldK; worldH=imgH*worldK;
+  const es=Math.min(EDIT_RES/Math.max(imgW,imgH),1);
+  editW=Math.round(imgW*es); editH=Math.round(imgH*es);
+  maskCanvas=null; tintedMask=null;
+  markCv=MARK_COLORS.map(()=>{const c=document.createElement('canvas');c.width=editW;c.height=editH;return c;});
+  refreshMarkCache();
+  defs=[]; posesCache=[]; undoStack=[]; pullLoops=[]; pullTimelineSec=0; pullTimelineScrub=false;
+  fitView();
+  clearWorldUI();
+  document.getElementById('stageHint').style.display='none';
+  ['analyzeBtn','resetBtn','saveBtn','sensorBtn','undoBtn'].forEach(id=>document.getElementById(id).disabled=false);
+  needle.style.display='block';
+  buildMarkCard();
+  setStatus('画像を読み込みました(端末内のみ)。「🤖 AI検出」または「➕ 枠追加」で対象を設定。');
+  if(!running){ running=true; requestAnimationFrame(loop); }
+}
+
+/* ================= AI検出 ================= */
+document.getElementById('analyzeBtn').addEventListener('click', analyze);
+async function analyze(){
+  if(!srcImg) return;
+  document.getElementById('analyzeBtn').disabled=true;
+  try{
+    if(!model){
+      setStatus('物体検出モデルを読み込み中(初回のみ)…',false,true);
+      model=await cocoSsd.load();
+    }
+    // ⑦ CG/イラストモード: AI検出はアニメに効かないので、中央に編集用の枠を1つ自動配置
+    if(document.getElementById('illustMode').checked){
+      const bw=imgW*0.94, bh=imgH*0.94;
+      const bx=(imgW-bw)/2, by=(imgH-bh)/2;
+      defs=[{
+        label:'キャラ', category:'person',
+        bboxPct:[bx/imgW*100,by/imgH*100,bw/imgW*100,bh/imgH*100],
+        params:Object.assign({anchored:true},PHYS_DEFAULT.person),
+        bones:[], pins:[], useMask:false, // マスクは無し(足す状態)から開始
+      }];
+      // マスクは空で開始
+      maskCanvas=document.createElement('canvas');
+      maskCanvas.width=editW; maskCanvas.height=editH;
+      refreshTintedMask();
+      buildAll();
+      setStatus('CGモード: 中央に枠を置きました。✂️マスクの🖌筆で輪郭をなぞる→🪣囲み塗りで内側を塗る、で切り出せます。枠は➕枠追加で調整可。');
+      return;
+    }
+    setStatus('対象物を検出中…',false,true);
+    const preds=await model.detect(srcImg,20,document.getElementById('illustMode').checked?0.12:0.45);
+    preds.sort((a,b)=>b.score-a.score);
+    const picked=preds.slice(0,6);
+    const byClass={};
+    picked.forEach(p=>{(byClass[p.class]=byClass[p.class]||[]).push(p);});
+    Object.values(byClass).forEach(arr=>{
+      if(arr.length===1) return;
+      arr.sort((a,b)=>a.bbox[0]-b.bbox[0]);
+      if(arr.length===2){arr[0]._suffix='(左)';arr[1]._suffix='(右)';}
+      else arr.forEach((p,i)=>p._suffix='('+(i+1)+')');
+    });
+    if(picked.some(p=>p.class==='person')){
+      try{
+        if(!segmenter){
+          setStatus('人物切り出しモデルを読み込み中(初回のみ)…',false,true);
+          segmenter=await bodySegmentation.createSegmenter(
+            bodySegmentation.SupportedModels.MediaPipeSelfieSegmentation,{runtime:'tfjs'});
+        }
+        setStatus('シルエットを切り出し中…',false,true);
+        const people=await segmenter.segmentPeople(srcImg);
+        if(people&&people.length){
+          const md=await bodySegmentation.toBinaryMask(people,{r:255,g:255,b:255,a:255},{r:0,g:0,b:0,a:0});
+          const tmp=document.createElement('canvas');
+          tmp.width=md.width; tmp.height=md.height;
+          tmp.getContext('2d').putImageData(md,0,0);
+          maskCanvas=document.createElement('canvas');
+          maskCanvas.width=editW; maskCanvas.height=editH;
+          maskCanvas.getContext('2d').drawImage(tmp,0,0,editW,editH);
+          refreshTintedMask();
+        }
+      }catch(err){ console.warn('seg failed',err); }
+      try{
+        if(!poseDetector){
+          setStatus('骨格検出モデルを読み込み中(初回のみ)…',false,true);
+          poseDetector=await poseDetection.createDetector(
+            poseDetection.SupportedModels.MoveNet,
+            {modelType:poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING, enableTracking:false});
+        }
+        setStatus('骨格を推定中…',false,true);
+        posesCache=await poseDetector.estimatePoses(srcImg,{maxPoses:6});
+      }catch(err){ console.warn('pose failed',err); posesCache=[]; }
+    }
+    defs=[];
+    picked.forEach(p=>{
+      const m=CLASS_MAP[p.class]||{cat:'object',jp:p.class};
+      const b=p.bbox;
+      const pose=(m.cat==='person')?matchPose({x:b[0],y:b[1],w:b[2],h:b[3]}):null;
+      defs.push({
+        label:m.jp+(p._suffix||''), category:m.cat,
+        bboxPct:[b[0]/imgW*100,b[1]/imgH*100,b[2]/imgW*100,b[3]/imgH*100],
+        params:Object.assign({anchored:true},PHYS_DEFAULT[m.cat]),
+        bones:pose?boneSegments(pose).segs:[],
+        pins:pose?boneSegments(pose).pins:[],
+        useMask:m.cat==='person',
+      });
+    });
+    buildAll();
+    setStatus(defs.length
+      ? defs.length+'個を分解。📌マーク付きボーンが固定アンカーです(ボーンツールで変更可)。'
+      : '人物が検出できませんでした。アニメ/CGなら「CGモード」をONにして再検出すると中央に枠が出ます。実写でも出ない時は「➕ 枠追加」で手動指定してください。', !defs.length);
+  }catch(err){
+    console.error(err);
+    setStatus('検出失敗: '+err.message+'(初回はモデルDLにネット接続が必要)',true);
+  }
+  document.getElementById('analyzeBtn').disabled=false;
+}
+function matchPose(bboxPx){
+  let best=null,bestN=0;
+  posesCache.forEach(pose=>{
+    const n=pose.keypoints.filter(k=>
+      k.score>0.3&&k.x>=bboxPx.x&&k.x<=bboxPx.x+bboxPx.w&&k.y>=bboxPx.y&&k.y<=bboxPx.y+bboxPx.h).length;
+    if(n>bestN){bestN=n;best=pose;}
+  });
+  return bestN>=5?best:null;
+}
+// ボーン形式: {a:{x,y}, b:{x,y}, pinned:bool} / pins: 点固定する関節座標の配列
+function boneSegments(pose){
+  const kp={};
+  pose.keypoints.forEach(k=>{if(k.score>0.3)kp[k.name]=k;});
+  const segs=[], pins=[];
+  const sMid=(kp['left_shoulder']&&kp['right_shoulder'])?{x:(kp['left_shoulder'].x+kp['right_shoulder'].x)/2,y:(kp['left_shoulder'].y+kp['right_shoulder'].y)/2}:null;
+  const hMid=(kp['left_hip']&&kp['right_hip'])?{x:(kp['left_hip'].x+kp['right_hip'].x)/2,y:(kp['left_hip'].y+kp['right_hip'].y)/2}:null;
+  BONE_PAIRS.forEach(pr=>{
+    // 背骨チェーンがある場合、左右の肩-腰ボーンは省いてお辞儀できるようにする
+    if(sMid&&hMid&&((pr[0]==='left_shoulder'&&pr[1]==='left_hip')||(pr[0]==='right_shoulder'&&pr[1]==='right_hip'))) return;
+    const a=kp[pr[0]],b=kp[pr[1]];
+    if(a&&b) segs.push({a:{x:a.x,y:a.y}, b:{x:b.x,y:b.y}, pinned:false});
+  });
+  if(sMid&&hMid){
+    const belly={x:(sMid.x+hMid.x)/2, y:(sMid.y+hMid.y)/2}; // 腹部関節
+    segs.push({a:sMid, b:belly, pinned:false});
+    segs.push({a:belly, b:hMid, pinned:false});
+  }
+  if(kp['nose']&&sMid) segs.push({a:{x:kp['nose'].x,y:kp['nose'].y}, b:sMid, pinned:false});
+  // 足首=接地点として点固定
+  ['left_ankle','right_ankle'].forEach(n=>{ if(kp[n]) pins.push({x:kp[n].x, y:kp[n].y}); });
+  return {segs, pins};
+}
+function normBones(arr){ // 旧形式([p1,p2])を新形式へ
+  return (arr||[]).map(s=>Array.isArray(s)?{a:s[0],b:s[1],pinned:false}:s);
+}
+function distToSeg(p,a,b){
+  const vx=b.x-a.x,vy=b.y-a.y,len2=vx*vx+vy*vy;
+  if(len2===0) return Math.hypot(p.x-a.x,p.y-a.y);
+  let t=((p.x-a.x)*vx+(p.y-a.y)*vy)/len2;
+  t=Math.min(Math.max(t,0),1);
+  return Math.hypot(p.x-(a.x+t*vx),p.y-(a.y+t*vy));
+}
+
+/* ================= マーク ================= */
+function refreshMarkCache(){
+  markData=markCv.map(cv=>cv?cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data:null);
+}
+function markAlpha(imgPt,i){
+  if(!markData[i]) return 0;
+  const ex=Math.min(editW-1,Math.max(0,Math.round(imgPt.x/imgW*editW)));
+  const ey=Math.min(editH-1,Math.max(0,Math.round(imgPt.y/imgH*editH)));
+  const a=markData[i][(ey*editW+ex)*4+3]/255;
+  return Math.min(1, a*1.6); // 効果カーブを強めに
+}
+function refreshTintedMask(){
+  bgCleanDirty=true;
+  if(!maskCanvas){tintedMask=null;return;}
+  tintedMask=document.createElement('canvas');
+  tintedMask.width=editW; tintedMask.height=editH;
+  const tc=tintedMask.getContext('2d');
+  tc.drawImage(maskCanvas,0,0);
+  tc.globalCompositeOperation='source-in';
+  tc.fillStyle='#6EE7D8';
+  tc.fillRect(0,0,editW,editH);
+}
+
+/* ================= ワールド ================= */
+function clearWorldUI(){
+  if(engine){Events.off(engine);Composite.clear(engine.world);Engine.clear(engine);engine=null;}
+  worldReady=false; layers=[];
+  document.getElementById('objList').innerHTML='';
+  document.getElementById('objCard').style.display='none';
+}
+function ensureWorld(){
+  if(worldReady) return;
+  engine=Engine.create();
+  engine.gravity.scale=0;
+  engine.positionIterations=8;
+  engine.constraintIterations=4;
+  const wallOpt={isStatic:true,restitution:.4};
+  Composite.add(engine.world,[
+    Bodies.rectangle(worldW/2,-40,worldW*2,80,wallOpt),
+    Bodies.rectangle(worldW/2,worldH+40,worldW*2,80,wallOpt),
+    Bodies.rectangle(-40,worldH/2,80,worldH*2,wallOpt),
+    Bodies.rectangle(worldW+40,worldH/2,80,worldH*2,wallOpt),
+  ]);
+  Events.on(engine,'beforeUpdate',()=>{
+    if(physPaused) return; // 静止中は外力を加えない(ポーズ保持)
+    const G=0.0012;
+    layers.forEach(L=>{
+      const gs=L.params.gravityScale;
+      L.allParts.concat(L.boneBodies).forEach(b=>{
+        if(b.isStatic) return;
+        const sw=b._sway||1;
+        Body.applyForce(b,b.position,{x:gBase.x*G*b.mass*gs*sw, y:gBase.y*G*b.mass*gs*sw});
+      });
+    });
+  });
+  worldReady=true;
+}
+function buildAll(){
+  // 既存の引張ループ拘束は world クリアで消えるので参照だけ無効化
+  pullLoops.forEach(pl=>{ pl.con=null; });
+  clearWorldUI();
+  ensureWorld();
+  defs.forEach(d=>buildLayer(d));
+  if(pullLoops.length) rebuildPullLoops();
+}
+
+function vertexMultOf(def,imgPt,refDist){
+  let m=1;
+  if(def.bones&&def.bones.length){
+    let dd=Infinity;
+    def.bones.forEach(seg=>{dd=Math.min(dd,distToSeg(imgPt,seg.a,seg.b));});
+    m=boneMult(dd,refDist);
+  }
+  // マーキングは重ね順を「A(下)→B(中)→C(上)」とし、上の層が下を上書き(blend)する。
+  // A: 大枠(硬い土台) / B: その上に載る可動部品(B優先) / C: 最上位・揺れ方向を反転
+  const aA=markAlpha(imgPt,0), aB=markAlpha(imgPt,1), aC=markAlpha(imgPt,2);
+  let massF=1, swayF=1, swayDir=1;
+  // A を土台として乗算適用
+  if(aA>0.02){
+    m*=1+(markInfo[0].stiffMult-1)*aA;
+    massF*=1+(markInfo[0].massMult-1)*aA;
+    swayF*=1+(markInfo[0].swayMult-1)*aA;
+  }
+  // B はその上に「載る」: B が濃いほど A の硬さを上書きしてB自身の値へblendする(部品として動く)
+  if(aB>0.02){
+    const tgtM=markInfo[1].stiffMult, tgtMass=markInfo[1].massMult, tgtSway=markInfo[1].swayMult;
+    // Bの場所はBの値へblend(Bが濃いほどBの部品特性が優勢=Aの上に載る)
+    m     = m*(1-aB)     + tgtM*aB;
+    massF = massF*(1-aB) + tgtMass*aB;
+    swayF = swayF*(1-aB) + tgtSway*aB;
+  }
+  // C は最上位: 揺れ方向を反転(swayDir)。濃いほど反転が強い→0.5でほぼ無効、1で完全反転
+  if(aC>0.02){
+    m*=1+(markInfo[2].stiffMult-1)*aC;
+    massF*=1+(markInfo[2].massMult-1)*aC;
+    swayF*=1+(markInfo[2].swayMult-1)*aC;
+    swayDir = 1 - 2*aC; // a=0→+1, a=0.5→0, a=1→-1(完全逆転)
+  }
+  return {
+    m:Math.min(Math.max(m,.08),5),
+    massF:Math.min(Math.max(massF,.12),5),
+    swayF:Math.min(Math.max(swayF,.2),8),
+    swayDir,
+  };
+}
+
+function buildLayer(def){
+  ensureWorld();
+  def.bones=normBones(def.bones);
+  const [bx,by,bw,bh]=def.bboxPct;
+  const w=Math.max(bw/100*worldW,30), h=Math.max(bh/100*worldH,30);
+  const x0=bx/100*worldW, y0=by/100*worldH;
+  const ix=bx/100*imgW, iy=by/100*imgH;
+  const iw=Math.max(2,bw/100*imgW), ihh=Math.max(2,bh/100*imgH);
+
+  const lc=document.createElement('canvas');
+  lc.width=Math.round(iw); lc.height=Math.round(ihh);
+  const lctx=lc.getContext('2d');
+  lctx.drawImage(srcImg,ix,iy,iw,ihh,0,0,lc.width,lc.height);
+  if(def.useMask&&maskCanvas){
+    lctx.globalCompositeOperation='destination-in';
+    lctx.filter='blur(2px)';
+    lctx.drawImage(maskCanvas, ix/imgW*editW, iy/imgH*editH, iw/imgW*editW, ihh/imgH*editH, 0,0,lc.width,lc.height);
+    lctx.filter='none';
+    lctx.globalCompositeOperation='source-over';
+  }
+
+  let cols=Math.max(2,Math.min(9,Math.round(w/70*meshDensity)));
+  let rows=Math.max(3,Math.min(14,Math.round(h/55*meshDensity)));
+  while((cols+1)*(rows+1)>170){ if(rows>=cols)rows--; else cols--; }
+  const cw=w/cols, ch=h/rows;
+  const radius=Math.max(3,Math.min(cw,ch)*0.30);
+
+  const params=def.params;
+  const group=Body.nextGroup(true);
+  const totalMass=1+params.density*9;
+  const pmBase=Math.max(.12,totalMass/((rows+1)*(cols+1)));
+
+  const trimOn=document.getElementById('trimMesh').checked && def.useMask && maskCanvas;
+  // coverage: maskCanvasを直接高解像度でサンプリング(lcの縮小よりはるかに正確)
+  let maskData=null;
+  if(trimOn&&maskCanvas){
+    const mc=document.createElement('canvas');
+    mc.width=maskCanvas.width; mc.height=maskCanvas.height;
+    mc.getContext('2d').drawImage(maskCanvas,0,0);
+    maskData=mc.getContext('2d').getImageData(0,0,mc.width,mc.height).data;
+  }
+  const coverage=(r,c)=>{
+    if(!maskData) return 1;
+    // 格子点(r,c)→画像座標
+    const mx=Math.round((ix+(c/cols)*iw)/imgW*(maskCanvas.width-1));
+    const my=Math.round((iy+(r/rows)*ihh)/imgH*(maskCanvas.height-1));
+    const mxc=Math.min(maskCanvas.width-1,Math.max(0,mx));
+    const myc=Math.min(maskCanvas.height-1,Math.max(0,my));
+    return maskData[(myc*maskCanvas.width+mxc)*4+3]/255;
+  };
+  // セル可視判定(描画のみ)
+  const cellVis=[];
+  for(let r=0;r<rows;r++){ cellVis.push([]); for(let c=0;c<cols;c++){
+    const cov=Math.max(coverage(r,c),coverage(r,c+1),coverage(r+1,c),coverage(r+1,c+1));
+    cellVis[r].push(trimOn ? cov>0.08 : true);
+  }}
+
+  def.pins=def.pins||[];
+  const hasBones=def.bones.length>0;
+  const hasPinnedBone=def.bones.some(s=>s.pinned)||def.pins.length>0;
+  // 下端固定は「足元固定ON」の間は常に有効。ピンはそれに加わる追加アンカー(下端固定を奪わない)
+  const footStatic = params.anchored;
+
+  const refDist=Math.max(iw,ihh)*0.16;
+  const parts=[],homes=[],mults=[],massFs=[],swayFs=[];
+  for(let r=0;r<=rows;r++){
+    parts.push([]);homes.push([]);mults.push([]);massFs.push([]);swayFs.push([]);
+    for(let c=0;c<=cols;c++){
+      const px=x0+c*cw, py=y0+r*ch;
+      const imgPt={x:ix+(c/cols)*iw, y:iy+(r/rows)*ihh};
+      const vm=vertexMultOf(def,imgPt,refDist);
+      // マスク外の頂点は null で飛ばす(頂点を作らない=バネも繋がない=空間に浮いたパペット)
+      const covHere=trimOn ? coverage(r,c) : 1;
+      if(trimOn && covHere < 0.08){
+        // null を格納してバネ生成時にスキップ
+        parts[r].push(null);homes[r].push(null);mults[r].push(1);massFs[r].push(1);swayFs[r].push(1);
+        continue;
+      }
+      const isFoot=(r===rows)&&footStatic;
+      const filter={group,mask:0}; // 物体間の衝突なし(パペットは互いに透過)
+      const b=Bodies.circle(px,py,radius,{
+        isStatic:isFoot, restitution:Math.min(1,params.restitution),
+        frictionAir:Math.min(.09,Math.max(.015,0.06/Math.sqrt(vm.swayF))),
+        collisionFilter:filter});
+      b._sway=vm.swayF;
+      b._swayDir=vm.swayDir||1;
+      b._foot=(r===rows);
+      if(!isFoot){
+        const mNorm=(vm.m-0.55)/1.05;
+        Body.setMass(b,Math.max(.05,pmBase*(0.6+0.8*Math.min(mNorm,2))*vm.massF));
+      }
+      parts[r].push(b);homes[r].push({x:px,y:py});mults[r].push(vm.m);massFs[r].push(vm.massF);swayFs[r].push(vm.swayF);
+    }
+  }
+
+  const gk=gridK(params.stiffness);
+  const gridCons=[];
+  function link(r1,c1,r2,c2,isShear){
+    const a=parts[r1][c1],b=parts[r2][c2];
+    if(!a||!b) return; // どちらかがnull(マスク外)なら繋がない
+    const m=(mults[r1][c1]+mults[r2][c2])/2;
+    const con=Constraint.create({bodyA:a,bodyB:b,damping:.08,
+      stiffness:Math.min(.98,(isShear?gk*.7:gk)*m),
+      length:Math.hypot(a.position.x-b.position.x,a.position.y-b.position.y)});
+    con._shear=!!isShear;con._va={r:r1,c:c1};con._vb={r:r2,c:c2};
+    gridCons.push(con);
+  }
+  for(let r=0;r<=rows;r++)for(let c=0;c<=cols;c++){
+    if(c<cols)link(r,c,r,c+1,false);
+    if(r<rows)link(r,c,r+1,c,false);
+    if(r<rows&&c<cols){link(r,c,r+1,c+1,true);link(r,c+1,r+1,c,true);}
+  }
+
+  const hk=homeK(params.stiffness);
+  const homeCons=[];
+  for(let r=0;r<rows;r++)for(let c=0;c<=cols;c++){
+    if(!parts[r][c]) continue; // null(マスク外)はスキップ
+    const con=Constraint.create({pointA:{x:homes[r][c].x,y:homes[r][c].y},bodyB:parts[r][c],damping:.04,length:0,
+      stiffness:hk*mults[r][c]/swayFs[r][c]});
+    con._v={r,c};
+    homeCons.push(con);
+  }
+
+  /* ====== 物理ボーン ====== */
+  const boneNodes=[],boneSegsB=[],boneCons=[],bendCons=[],skinCons=[];
+  if(hasBones){
+    const mergeR=Math.max(refDist*0.6,12/worldK);
+    def.bones.forEach(seg=>{
+      const pair=[seg.a,seg.b].map(p=>{
+        let n=boneNodes.find(nd=>Math.hypot(nd.imgPt.x-p.x,nd.imgPt.y-p.y)<mergeR);
+        if(!n){n={imgPt:{x:p.x,y:p.y},pinned:false};boneNodes.push(n);}
+        return n;
+      });
+      if(seg.pinned){pair[0].pinned=true;pair[1].pinned=true;}
+      boneSegsB.push({pair,seg});
+    });
+    boneNodes.forEach(n=>{
+      if(def.pins.some(p=>Math.hypot(p.x-n.imgPt.x,p.y-n.imgPt.y)<mergeR)) n.pinned=true;
+    });
+    boneNodes.forEach(n=>{
+      n.home=imgToWorld(n.imgPt);
+      const st=params.anchored&&n.pinned;
+      n.body=Bodies.circle(n.home.x,n.home.y,Math.max(3,radius*0.8),
+        {isStatic:st, restitution:.1,frictionAir:.07,collisionFilter:{group,mask:0}});
+      if(!st) Body.setMass(n.body,pmBase*2.2);
+    });
+    // 骨: 柔らかさに応じて伸縮するリンク + 擬似Z振り子
+    boneSegsB.forEach(bs=>{
+      const [n1,n2]=bs.pair;
+      const rest=Math.hypot(n1.home.x-n2.home.x,n1.home.y-n2.home.y);
+      const con=Constraint.create({bodyA:n1.body,bodyB:n2.body,
+        stiffness:.55+.4*Math.min(1,params.stiffness), damping:.1, length:rest});
+      con._rest=rest;
+      bs.con=con;
+      bs.z={ang:0, vel:0, seed:(Math.random()*2-1)};
+      boneCons.push(con);
+    });
+    // 関節曲げ剛性
+    for(let i=0;i<boneSegsB.length;i++)for(let j=i+1;j<boneSegsB.length;j++){
+      const A=boneSegsB[i].pair,B=boneSegsB[j].pair;
+      let shared=null;
+      A.forEach(n=>{if(B.includes(n))shared=n;});
+      if(shared){
+        const fa=A[0]===shared?A[1]:A[0];
+        const fb=B[0]===shared?B[1]:B[0];
+        if(fa!==fb){
+          bendCons.push(Constraint.create({bodyA:fa.body,bodyB:fb.body,damping:.08,
+            stiffness:jointKf(params.jointStiff),
+            length:Math.hypot(fa.home.x-fb.home.x,fa.home.y-fb.home.y)}));
+        }
+      }
+    }
+    // スキニング
+    boneNodes.forEach(n=>{
+      const cand=[];
+      for(let r=0;r<=rows;r++)for(let c=0;c<=cols;c++){
+        cand.push({b:parts[r][c],d:Math.hypot(homes[r][c].x-n.home.x,homes[r][c].y-n.home.y)});
+      }
+      cand.sort((x,y)=>x.d-y.d);
+      cand.slice(0,4).forEach(cd=>{
+        skinCons.push(Constraint.create({bodyA:n.body,bodyB:cd.b,stiffness:.35,damping:.06,length:cd.d}));
+      });
+    });
+  }
+
+  /* ====== 楕円ボーン(点ボーンに従属してマスクを揺らす影響範囲) ====== */
+  def.spheres=def.spheres||[];
+  const sphereObjs=[], sphereCons=[];
+  def.spheres.forEach(sp=>{
+    if(sp.rx===undefined){ sp.rx=sp.r||40; sp.ry=sp.r||40; sp.rot=0; }
+    if(sp.soft===undefined) sp.soft=0.5; // 0=硬い(ボーンにきっちり追従) 1=柔らかい(ゆったり追従)
+    const cosA=Math.cos(sp.rot||0), sinA=Math.sin(sp.rot||0);
+    const ellDist=(px,py)=>{ const dx=px-sp.cx, dy=py-sp.cy;
+      const u=(dx*cosA+dy*sinA)/sp.rx, v=(-dx*sinA+dy*cosA)/sp.ry; return Math.hypot(u,v); };
+    const cImg={x:sp.cx, y:sp.cy};
+    const cHome=imgToWorld(cImg);
+    // この楕円の中心に最も近い点ボーンを探し、それを重心(駆動点)とする
+    let anchor=null, ad=Infinity;
+    boneNodes.forEach(n=>{
+      const d=Math.hypot(n.home.x-cHome.x, n.home.y-cHome.y);
+      if(d<ad){ ad=d; anchor=n; }
+    });
+    const rWx=sp.rx*worldK, rWy=sp.ry*worldK;
+    // 楕円内のメッシュ頂点を、アンカー(点ボーン)へバインド。中心ほど強く=マーキング同様の柔らかさ
+    const verts=[];
+    for(let r=0;r<=rows;r++)for(let c=0;c<=cols;c++){
+      if(!parts[r][c]||!homes[r][c]) continue;
+      const ipx=homes[r][c].x/worldK, ipy=homes[r][c].y/worldK;
+      const ed=ellDist(ipx,ipy);
+      if(ed<1.0){
+        const wCore=Math.cos(ed*Math.PI/2); // 中心1→縁0
+        verts.push({b:parts[r][c], wCore,
+          homeX:homes[r][c].x, homeY:homes[r][c].y,
+          // アンカーのホーム位置からのオフセット(=この頂点の相対位置)
+          relX:homes[r][c].x-(anchor?anchor.home.x:cHome.x),
+          relY:homes[r][c].y-(anchor?anchor.home.y:cHome.y)});
+      }
+    }
+    sphereObjs.push({sp, anchor, cHome, rWx, rWy, cosA, sinA, verts});
+  });
+
+  const allParts=parts.flat();
+  const boneBodies=boneNodes.map(n=>n.body);
+  Composite.add(engine.world,allParts.concat(boneBodies).concat(gridCons).concat(homeCons).concat(boneCons).concat(bendCons).concat(skinCons));
+
+  const L={
+    def,label:def.label,category:def.category,
+    img:lc,cols,rows,parts,homes,mults,massFs,swayFs,allParts,gridCons,homeCons,params,pmBase,cellVis,
+    boneNodes,boneSegsB,boneCons,bendCons,skinCons,boneBodies,hasPinnedBone,
+    sphereObjs,
+    color:COLORS[layers.length%COLORS.length],
+    bboxImg:{ix,iy,iw,ihh},refDist,
+  };
+  layers.push(L);
+  appendCard(L);
+}
+
+function updatePhysicsMaps(){
+  layers.forEach(L=>{
+    for(let r=0;r<=L.rows;r++)for(let c=0;c<=L.cols;c++){
+      const imgPt={x:L.bboxImg.ix+(c/L.cols)*L.bboxImg.iw,y:L.bboxImg.iy+(r/L.rows)*L.bboxImg.ihh};
+      const vm=vertexMultOf(L.def,imgPt,L.refDist);
+      L.mults[r][c]=vm.m;L.massFs[r][c]=vm.massF;L.swayFs[r][c]=vm.swayF;
+      const b=L.parts[r][c];
+      b._sway=vm.swayF;
+      b._swayDir=vm.swayDir||1;
+      b.frictionAir=Math.min(.09,Math.max(.015,0.06/Math.sqrt(vm.swayF)));
+      if(!b.isStatic){
+        const mNorm=(vm.m-0.55)/1.05;
+        Body.setMass(b,Math.max(.05,L.pmBase*(0.6+0.8*Math.min(mNorm,2))*vm.massF));
+      }
+    }
+    const gk=gridK(L.params.stiffness),hk=homeK(L.params.stiffness);
+    L.gridCons.forEach(con=>{
+      const m=(L.mults[con._va.r][con._va.c]+L.mults[con._vb.r][con._vb.c])/2;
+      con.stiffness=Math.min(.98,(con._shear?gk*.7:gk)*m);
+    });
+    L.homeCons.forEach(con=>{
+      con.stiffness=hk*L.mults[con._v.r][con._v.c]/L.swayFs[con._v.r][con._v.c];
+    });
+  });
+}
+
+/* ====== 擬似Z(奥行き)振り子: ボーン長を伸縮させ前後揺れを表現 ====== */
+function updateDepthSway(dtSec){
+  if(!layers.length) return;
+  inertiaPulse*=Math.pow(0.92, dtSec*60);
+  const gDelta=Math.hypot(gBase.x-gPrev.x,gBase.y-gPrev.y);
+  inertiaPulse=Math.min(3, inertiaPulse+gDelta*2);
+  gPrev={...gBase};
+  layers.forEach(L=>{
+    const depth=Math.min(4,L.params.depthSway||0);
+    if(!depth||!L.boneSegsB.length) return;
+    const soft=1-Math.min(1,L.params.stiffness)*.7;
+    const kz=6+Math.min(1,L.params.stiffness)*26;
+    L.boneSegsB.forEach(bs=>{
+      const z=bs.z;
+      const drive=inertiaPulse*z.seed*7*depth*soft;
+      z.vel+=(-kz*z.ang-3*z.vel+drive)*dtSec;
+      z.ang=Math.max(-1.25,Math.min(1.25,z.ang+z.vel*dtSec));
+      bs.con.length=bs.con._rest*(0.55+0.45*Math.cos(z.ang));
+    });
+  });
+}
+
+/* ====== 慣性力 ====== */
+function applyInertia(accX,accY){
+  if(!engine) return;
+  const ax=Math.max(-6000,Math.min(6000,accX)),ay=Math.max(-6000,Math.min(6000,accY));
+  inertiaPulse=Math.min(3,inertiaPulse+Math.hypot(ax,ay)*0.0008);
+  // 球の揺れ駆動: 慣性は加速度と逆向き。スケールして蓄積
+  lastInertia.x+=-ax*0.00025; lastInertia.y+=-ay*0.00025;
+  lastInertia.x=Math.max(-3,Math.min(3,lastInertia.x));
+  lastInertia.y=Math.max(-3,Math.min(3,lastInertia.y));
+  layers.forEach(L=>{
+    L.allParts.concat(L.boneBodies).forEach(b=>{
+      if(!b.isStatic){ const sd=(b._swayDir||1); Body.applyForce(b,b.position,{x:-ax*INERTIA_K*b.mass*(b._sway||1)*sd,y:-ay*INERTIA_K*b.mass*(b._sway||1)*sd}); }
+    });
+  });
+}
+
+/* ====== 球ボーンの揺れ更新(上下左右) ====== */
+function updateSphereWobble(dtSec){
+  // 楕円は点ボーンに従属。アンカーボーンの変位を、楕円内の頂点へ中心ほど強く伝える。
+  layers.forEach(L=>{
+    (L.sphereObjs||[]).forEach(o=>{
+      const a=o.anchor;
+      if(!a||!a.body) return;
+      // アンカーボーンが home からどれだけ動いたか(=引っ張り/ループ/ポーズによる移動)
+      const dx=a.body.position.x - a.home.x;
+      const dy=a.body.position.y - a.home.y;
+      // 柔らかさ: soft=0 きっちり追従(0.9) / soft=1 ゆったり(0.25)
+      // 柔らかさ: soft=0→即追従, soft=1→ゆったり。毎フレームsetPositionで強制適用するので確実に効く
+      const blend=1.0-0.7*o.sp.soft; // 0.3〜1.0
+      o.verts.forEach(v=>{
+        if(v.b.isStatic) return;
+        const targetX=v.homeX + dx*v.wCore;
+        const targetY=v.homeY + dy*v.wCore;
+        const k=blend*v.wCore; // 中心=強く、縁=緩く
+        const nx=v.b.position.x+(targetX-v.b.position.x)*k;
+        const ny=v.b.position.y+(targetY-v.b.position.y)*k;
+        Body.setPosition(v.b,{x:nx,y:ny});
+        Body.setVelocity(v.b,{x:0,y:0});
+      });
+    });
+  });
+}
+
+/* ================= Undo ================= */
+function snapCanvas(cv){
+  if(!cv) return null;
+  const c=document.createElement('canvas');
+  c.width=cv.width;c.height=cv.height;
+  c.getContext('2d').drawImage(cv,0,0);
+  return c;
+}
+function pushUndo(kind){
+  const snap={kind};
+  if(kind==='mask')snap.mask=snapCanvas(maskCanvas);
+  if(kind==='mark')snap.marks=markCv.map(snapCanvas);
+  if(kind==='bones'){snap.bones=defs.map(d=>JSON.parse(JSON.stringify(d.bones)));snap.pins=defs.map(d=>JSON.parse(JSON.stringify(d.pins||[])));}
+  if(kind==='pullloop'){
+    // 矢印1本ずつのUndo用に、操作前のpullLoops構成(座標と位相のみ)を記録
+    snap.pullLoopsBefore=pullLoops.map(pl=>({axImg:pl.axImg,ayImg:pl.ayImg,bxImg:pl.bxImg,byImg:pl.byImg,phase:pl.phase}));
+  }
+  undoStack.push(snap);
+  if(undoStack.length>12)undoStack.shift();
+}
+document.getElementById('undoBtn').addEventListener('click',()=>{
+  const snap=undoStack.pop();
+  if(!snap){setStatus('戻れる編集履歴がありません。');return;}
+  if(snap.kind==='mask'){maskCanvas=snap.mask;refreshTintedMask();buildAll();}
+  if(snap.kind==='mark'){snap.marks.forEach((c,i)=>{if(c)markCv[i]=c;});refreshMarkCache();updatePhysicsMaps();}
+  if(snap.kind==='bones'){defs.forEach((d,i)=>{if(snap.bones[i])d.bones=snap.bones[i];if(snap.pins&&snap.pins[i])d.pins=snap.pins[i];});buildAll();}
+  if(snap.kind==='pullloop'){
+    // この矢印操作(配置/削除)1回だけを取り消し、他の矢印には触れない
+    clearPullLoopCons();
+    pullLoops=snap.pullLoopsBefore.map(p=>({axImg:p.axImg,ayImg:p.ayImg,bxImg:p.bxImg,byImg:p.byImg,phase:p.phase,con:null}));
+    rebuildPullLoops();
+  }
+  pullLoopDraw=null;
+  setStatus(snap.kind==='pullloop'?'引っ張り矢印を1つ戻しました。':'直前の編集に戻しました。');
+});
+
+/* ================= モード/ツール ================= */
+const modeBtn=document.getElementById('modeBtn');
+const viewBtn=document.getElementById('viewBtn');
+let panelOpen=true;
+modeBtn.addEventListener('click',()=>{
+  panelOpen=!panelOpen;
+  panel.style.display=panelOpen?'flex':'none';
+  modeBtn.textContent=panelOpen?'✕':'🛠';
+  modeBtn.classList.toggle('closed', !panelOpen);
+  modeBtn.title=panelOpen?'ツールパネルを閉じる':'ツールパネルを開く(編集は継続)';
+});
+viewBtn.addEventListener('click',()=>{
+  appMode=appMode==='edit'?'view':'edit';
+  viewBtn.textContent=appMode==='edit'?'👁 閲覧':'✏️ 編集';
+  viewBtn.classList.toggle('viewing', appMode==='view');
+  if(appMode==='view'){
+    // 閲覧へ: pullLoopDraw中断、静止解除
+    pullLoopDraw=null;
+    if(physPaused){
+      physPaused=false;
+      const pe=document.getElementById('poseEdit');
+      pe.textContent='❄ その場で静止'; pe.classList.remove('toggled');
+    }
+  }
+  setStatus(appMode==='view'?'閲覧モード(引っ張りループは動作中・編集ツールは無効)':'編集モードに戻りました。');
+});
+document.querySelectorAll('button.tool').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    tool=btn.dataset.tool;
+    document.querySelectorAll('button.tool').forEach(b=>b.classList.toggle('toggled',b===btn));
+    ['grab','pullloop','mask','mark','bone','addbox'].forEach(t=>{
+      const el=document.getElementById('sub-'+t);
+      if(el)el.classList.toggle('show',t===tool);
+    });
+    bonePending=null;
+    // ツール切替時は静止モードを必ず解除(暗転・固まりからの脱出口)
+    if(physPaused){
+      physPaused=false;
+      const pe=document.getElementById('poseEdit');
+      pe.textContent='❄ その場で静止'; pe.classList.remove('toggled');
+    }
+    if(tool==='bone' && typeof setBoneMode==='function') setBoneMode('move');
+    if(tool==='mask'||tool==='mark') stopMotionForEdit();
+    // ボーンツール選択時は楕円設定カードを自動で開く(配置と設定が近くにある状態に)
+    if(tool==='bone'){ const sc=document.getElementById('sphereCard'); if(sc) sc.classList.remove('collapsed'); }
+    hideChooser();
+  });
+});
+// カード見出しクリックで折りたたみ
+document.querySelectorAll('#panel .card > h2').forEach(h=>{
+  h.addEventListener('click',()=>h.parentElement.classList.toggle('collapsed'));
+});
+let maskMode='add',markMode='add',boneMode='move',markSel=0;
+let maskTool='brush'; // brush | bucket | wand
+let srcEditCache=null; // 元画像を編集解像度でサンプリングしたImageData
+function triToggle(ids,setters){
+  ids.forEach((id,i)=>{
+    document.getElementById(id).addEventListener('click',()=>{
+      ids.forEach(x=>document.getElementById(x).classList.toggle('toggled',x===id));
+      setters(i);
+    });
+  });
+}
+triToggle(['maskAdd','maskErase'],i=>maskMode=i===0?'add':'erase');
+triToggle(['maskBrushMode','maskBucket','maskWand'],i=>{ maskTool=['brush','bucket','wand'][i];
+  document.getElementById('maskHintNote') && (document.getElementById('maskHintNote').textContent='');
+});
+document.getElementById('maskAll').addEventListener('click',()=>{
+  ensureMaskCv(); pushUndo('mask');
+  const mc=maskCanvas.getContext('2d'); mc.globalCompositeOperation='source-over';
+  mc.fillStyle='#fff'; mc.fillRect(0,0,editW,editH);
+  refreshTintedMask(); buildAll(); setStatus('マスクを全面(全部表示)にしました。ここから不要部を消していけます。');
+});
+document.getElementById('maskClear').addEventListener('click',()=>{
+  ensureMaskCv(); pushUndo('mask');
+  maskCanvas.getContext('2d').clearRect(0,0,editW,editH);
+  refreshTintedMask(); buildAll(); setStatus('マスクを全消ししました。');
+});
+triToggle(['markAdd','markErase'],i=>markMode=i===0?'add':'erase');
+const boneHints={
+  move:'骨の端点(丸)をドラッグで移動。固定点は赤。',
+  add:'1点目をクリック…(既存の点の近くなら連結されます)',
+  del:'削除したい骨の線をクリック',
+  pin:'固定したい関節点を1つクリック(赤=固定/再クリックで解除)。操作後は自動で通常編集に戻ります。',
+  sphere:'塊にしたい所をドラッグで円を描く(中心から半径)。既存の球をドラッグで移動、小さく描くと削除。'
+};
+function setBoneMode(m){
+  boneMode=m;
+  bonePending=null;
+  const map={move:'boneMove',add:'boneAdd',del:'boneDel',sphere:'boneSphere'};
+  ['boneMove','boneAdd','boneDel','boneSphere'].forEach(id=>{
+    document.getElementById(id).classList.toggle('toggled', map[m]===id);
+  });
+  const pinBtn=document.getElementById('bonePin');
+  pinBtn.classList.toggle('toggled', m==='pin');
+  pinBtn.textContent = m==='pin' ? '📌 固定中(解除)' : '📌 固定';
+  document.getElementById('boneHint').textContent=boneHints[m];
+}
+document.getElementById('boneMove').addEventListener('click',()=>setBoneMode('move'));
+document.getElementById('boneAdd').addEventListener('click',()=>setBoneMode('add'));
+document.getElementById('boneDel').addEventListener('click',()=>setBoneMode('del'));
+document.getElementById('boneSphere').addEventListener('click',()=>setBoneMode('sphere'));
+function styleLabel(v){ return v<0.34?'ぷるん':v<0.67?'中間':'ゆさっ'; }
+function softLabel(v){ return v<0.34?'硬め':v<0.67?'中間':'柔らかい'; }
+function syncSphereUI(){
+  const sp=selSphere;
+  const soft=sp?(sp.soft??0.5):sphSoft;
+  document.getElementById('sphSoft').value=Math.round(soft*100);
+  document.getElementById('sphSoftOut').textContent=softLabel(soft);
+  if(sp){
+    const rx=Math.round(sp.rx||40), ry=Math.round(sp.ry||40), rotDeg=Math.round((sp.rot||0)*180/Math.PI);
+    document.getElementById('sphRX').value=Math.min(400,rx); document.getElementById('sphRXOut').textContent=rx;
+    document.getElementById('sphRY').value=Math.min(400,ry); document.getElementById('sphRYOut').textContent=ry;
+    const rd=((rotDeg%180)+180)%180;
+    document.getElementById('sphRot').value=rd; document.getElementById('sphRotOut').textContent=rd+'°';
+  }
+}
+document.getElementById('sphSoft').addEventListener('input',e=>{
+  const v=e.target.value/100; sphSoft=v;
+  document.getElementById('sphSoftOut').textContent=softLabel(v);
+  if(selSphere){ selSphere.soft=v; }
+});
+function bindShape(id,outId,prop,fmt,toVal){
+  const el=document.getElementById(id);
+  el.addEventListener('input',e=>{
+    const raw=+e.target.value;
+    document.getElementById(outId).textContent=fmt(raw);
+    if(selSphere){ selSphere[prop]=toVal(raw); }
+  });
+  el.addEventListener('change',()=>{ if(selSphere) buildAll(); });
+}
+bindShape('sphRX','sphRXOut','rx', v=>v, v=>v);
+bindShape('sphRY','sphRYOut','ry', v=>v, v=>v);
+bindShape('sphRot','sphRotOut','rot', v=>v+'°', v=>v*Math.PI/180);
+document.getElementById('bonePin').addEventListener('click',()=>setBoneMode(boneMode==='pin'?'move':'pin'));
+document.getElementById('markSel').addEventListener('change',e=>markSel=+e.target.value);
+document.getElementById('markOpacity').addEventListener('input',e=>{
+  document.getElementById('markOpacityOut').textContent=(e.target.value/100).toFixed(2);
+});
+document.getElementById('zoomReset').addEventListener('click',fitView);
+const plDelBtn=document.getElementById('pullLoopDelMode');
+plDelBtn.addEventListener('click',()=>{
+  pullLoopDelMode=!pullLoopDelMode;
+  plDelBtn.classList.toggle('toggled',pullLoopDelMode);
+  setStatus(pullLoopDelMode?'矢印削除モード: 削除したい矢印の始点か線をクリック。':'矢印削除モードを解除しました。');
+});
+document.getElementById('pullLoopClear').addEventListener('click',()=>{
+  pushUndo('pullloop');
+  clearPullLoopCons(); pullLoops=[]; setStatus('引っ張りループを全消去しました。(戻るで復元可)');
+});
+document.getElementById('pullLoopPeriod').addEventListener('input',e=>{
+  pullLoopPeriod=e.target.value/10;
+  document.getElementById('pullLoopPeriodOut').textContent=pullLoopPeriod.toFixed(1)+'秒';
+});
+const plPauseBtn=document.getElementById('pullLoopPause');
+plPauseBtn.addEventListener('click',()=>{
+  pullLoopsPaused=!pullLoopsPaused;
+  plPauseBtn.textContent=pullLoopsPaused?'▶ 再開':'⏸ 一時停止';
+  plPauseBtn.classList.toggle('toggled',pullLoopsPaused);
+});
+const plTimeline=document.getElementById('pullLoopTimeline');
+plTimeline.addEventListener('pointerdown',()=>{ pullTimelineScrub=true; });
+plTimeline.addEventListener('input',e=>{
+  const frac=e.target.value/1000; // 0〜1
+  pullTimelineSec=frac*pullLoopPeriod;
+  document.getElementById('pullLoopTimelineOut').textContent=Math.round(frac*100)+'%';
+});
+['pointerup','pointercancel'].forEach(ev=>plTimeline.addEventListener(ev,()=>{
+  pullTimelineScrub=false;
+  setStatus('タイムラインのこの位置で矢印を配置すると、そこが動作開始点になります。');
+}));
+document.getElementById('densitySlider').addEventListener('input',e=>{
+  meshDensity=e.target.value/100;
+  document.getElementById('densityOut').textContent=meshDensity.toFixed(1)+'×';
+});
+document.getElementById('densitySlider').addEventListener('change',()=>{
+  if(defs.length){buildAll();setStatus('メッシュ密度 '+meshDensity.toFixed(1)+'× で再構築。');}
+});
+document.getElementById('bgMode').addEventListener('change',e=>bgMode=e.target.value);
+document.getElementById('trimMesh').addEventListener('change',()=>{ if(defs.length){ buildAll(); setStatus('メッシュの透明セル除去を切り替えました。'); }});
+document.getElementById('bgColor').addEventListener('input',e=>bgColor=e.target.value);
+
+/* ================= ポインタ ================= */
+stage.addEventListener('pointerdown',onDown);
+stage.addEventListener('pointermove',onMove);
+window.addEventListener('pointerup',onUp);
+window.addEventListener('pointercancel',onUp);
+stage.addEventListener('wheel',e=>{
+  if(!srcImg)return;
+  e.preventDefault();
+  zoomAt(canvasPt(e),e.deltaY<0?1.12:1/1.12);
+},{passive:false});
+function zoomAt(p,f){
+  const ns=Math.min(8,Math.max(.3,view.s*f));
+  const real=ns/view.s;
+  view.x=p.x-(p.x-view.x)*real;
+  view.y=p.y-(p.y-view.y)*real;
+  view.s=ns;
+  clampView();
+}
+function effTool(){ return appMode==='view'?'viewGesture':tool; }
+
+function onDown(e){
+  if(!srcImg||chooser.contains(e.target))return;
+  stage.setPointerCapture&&stage.setPointerCapture(e.pointerId);
+  activePtrs.set(e.pointerId,canvasPt(e));
+  if(activePtrs.size===2){
+    const pts=[...activePtrs.values()];
+    pinch={d0:Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y),s0:view.s,
+           mid0:{x:(pts[0].x+pts[1].x)/2,y:(pts[0].y+pts[1].y)/2},vx0:view.x,vy0:view.y};
+    cancelOps();
+    return;
+  }
+  const w=worldOf(e);
+  hoverPt=w;
+  if(physPaused){
+    // 静止中は引っ張りで形を作る(メッシュごと動くので貫通しない)
+    if(!startPull(w)) startPoseDrag(w);
+    return;
+  }
+  const t=effTool();
+  if(t==='bone'){
+    if(modelPlace){ placeModelPoint(worldToImgPt(w)); return; }
+    boneToolDown(w);
+    return;
+  }
+  if(t==='viewGesture'){
+    if(!startPull(w))startGrab(e);
+    return;
+  }
+  switch(t){
+    case 'grab':startGrab(e);break;
+    case 'pull':startPull(w);break;
+    case 'pullloop':
+      if(pullLoopDelMode){
+        const hi=pullLoopAt(w.x,w.y);
+        if(hi>=0){ pushUndo('pullloop'); removePullLoop(hi); setStatus('矢印を削除しました。(戻るで復元可)'); }
+        else setStatus('近くに矢印がありません。始点(●)か線をクリックしてください。',true);
+      }else pullLoopDraw={ax:w.x,ay:w.y,bx:w.x,by:w.y};
+      break;
+    case 'tilt':if(!sensorOn){dragTilt=true;setTiltFromPointer(e);}break;
+    case 'mask':
+      ensureMaskCv(); pushUndo('mask');
+      if(maskTool==='bucket'){
+        maskEnclosedFill(worldToImgPt(w), maskMode==='add');
+      }else if(maskTool==='wand'){
+        const tol=+document.getElementById('maskTol').value;
+        maskFloodFill(worldToImgPt(w), maskMode==='add', tol);
+      }else{
+        painting=true;lastPaint=w;paintMask(w,w);
+      }
+      break;
+    case 'mark':pushUndo('mark');painting=true;lastPaint=w;paintMark(w,w);break;
+    case 'bone':break;
+    case 'addbox':drawStart=w;drawRect={x:w.x,y:w.y,w:0,h:0};break;
+  }
+}
+function onMove(e){
+  if(!srcImg)return;
+  if(activePtrs.has(e.pointerId))activePtrs.set(e.pointerId,canvasPt(e));
+  const w=worldOf(e);
+  hoverPt=w;
+  if(pinch&&activePtrs.size===2){
+    const pts=[...activePtrs.values()];
+    const d=Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y);
+    const mid={x:(pts[0].x+pts[1].x)/2,y:(pts[0].y+pts[1].y)/2};
+    const ns=Math.min(8,Math.max(.3,pinch.s0*d/Math.max(1,pinch.d0)));
+    view.s=ns;
+    view.x=mid.x-(pinch.mid0.x-pinch.vx0)*(ns/pinch.s0);
+    view.y=mid.y-(pinch.mid0.y-pinch.vy0)*(ns/pinch.s0);
+    clampView();
+    return;
+  }
+  if(pull){ pull.con.pointA=w; return; }
+  if(pullLoopDraw){ pullLoopDraw.bx=w.x; pullLoopDraw.by=w.y; return; }
+  if(poseDrag){
+    Body.setPosition(poseDrag.body,w);
+    Body.setVelocity(poseDrag.body,{x:0,y:0});
+    return;
+  }
+  if(sphereDraw){
+    const ip=worldToImgPt(w);
+    sphereDraw.x1=ip.x; sphereDraw.y1=ip.y;
+    return;
+  }
+  if(sphereDrag){ const ip=worldToImgPt(w); sphereDrag.sp.cx=ip.x-sphereDrag.ox; sphereDrag.sp.cy=ip.y-sphereDrag.oy; return; }
+  if(boneDrag){ boneDrag.pt.x=worldToImgPt(w).x; boneDrag.pt.y=worldToImgPt(w).y; return; }
+  if(grab){moveGrab(e);return;}
+  const t=effTool();
+  switch(t){
+    case 'pull':case 'viewGesture':if(pull){pull.con.pointA=w;}break;
+    case 'tilt':if(dragTilt)setTiltFromPointer(e);break;
+    case 'mask':if(painting){paintMask(lastPaint,w);lastPaint=w;}break;
+    case 'mark':if(painting){paintMark(lastPaint,w);lastPaint=w;}break;
+    case 'addbox':
+      if(drawStart){
+        drawRect={x:Math.min(drawStart.x,w.x),y:Math.min(drawStart.y,w.y),
+                  w:Math.abs(w.x-drawStart.x),h:Math.abs(w.y-drawStart.y)};
+      }break;
+  }
+}
+function onUp(e){
+  activePtrs.delete(e.pointerId);
+  if(activePtrs.size<2)pinch=null;
+  if(dragTilt){dragTilt=false;gBase={x:0,y:1};}
+  if(pull){Composite.remove(engine.world,pull.con);pull=null;}
+  poseDrag=null;
+  if(sphereDraw){
+    const minR=Math.max(imgW*0.02,8);
+    const cx=(sphereDraw.x0+sphereDraw.x1)/2, cy=(sphereDraw.y0+sphereDraw.y1)/2;
+    const rx=Math.abs(sphereDraw.x1-sphereDraw.x0)/2, ry=Math.abs(sphereDraw.y1-sphereDraw.y0)/2;
+    const def=sphereDraw.def||defAt({x:cx,y:cy});
+    if(def && rx>=minR && ry>=minR){
+      def.spheres=def.spheres||[];
+      const sp={cx,cy,rx,ry,rot:0,soft:sphSoft};
+      def.spheres.push(sp); selSphere=sp;
+      buildAll(); setStatus('楕円ボーンを追加しました。重心モードで支点を動かすと頷きなどが作れます。');
+    } else setStatus('小さすぎる/枠外のため追加しませんでした(レイヤー内で大きめに描いてください)。',true);
+    sphereDraw=null; return;
+  }
+  if(sphereDrag){
+    sphereDrag=null; buildAll(); setStatus('楕円を移動しました。'); return;
+  }
+  if(boneDrag){ boneDrag=null; buildAll(); setStatus('骨の点を移動しました。'); }
+  if(pullLoopDraw){
+    const d=pullLoopDraw; pullLoopDraw=null;
+    const len=Math.hypot(d.bx-d.ax,d.by-d.ay);
+    if(len>15/view.s){ addPullLoop(d.ax,d.ay,d.bx,d.by); }
+    else setStatus('矢印が短すぎます。引っ張りたい場所から方向へドラッグしてください。',true);
+  }
+  endGrab();
+  if(painting){
+    painting=false;lastPaint=null;
+    if(tool==='mask'){refreshTintedMask();buildAll();setStatus('マスク更新→メッシュ再構築。');}
+    if(tool==='mark'){refreshMarkCache();updatePhysicsMaps();setStatus('マーキング濃度を反映しました。');}
+  }
+  if(tool==='addbox'&&drawStart){
+    drawStart=null;
+    if(drawRect&&drawRect.w>20/view.s&&drawRect.h>20/view.s){
+      pendingRect=Object.assign({},drawRect);
+      showChooser(e.clientX,e.clientY);
+    }else drawRect=null;
+  }
+}
+function cancelOps(){
+  dragTilt=false;
+  poseDrag=null;
+  boneDrag=null;
+  pullLoopDraw=null;
+  sphereDraw=null;
+  sphereDrag=null;
+  if(pull){Composite.remove(engine.world,pull.con);pull=null;}
+  grab=null;
+  if(painting){painting=false;lastPaint=null;undoStack.pop();}
+  drawStart=null;drawRect=null;
+}
+function setTiltFromPointer(e){
+  gBase.x=((e.clientX)/window.innerWidth-.5)*3;
+  gBase.y=((e.clientY)/window.innerHeight-.5)*3+.5;
+}
+
+/* ====== つかむ ====== */
+function startGrab(e){
+  const p=canvasPt(e);
+  grab={last:p,vel:{x:0,y:0},t:performance.now()};
+}
+function moveGrab(e){
+  const p=canvasPt(e);
+  const now=performance.now();
+  const dt=Math.max(8,now-grab.t)/1000;
+  const dx=p.x-grab.last.x,dy=p.y-grab.last.y;
+  view.x+=dx;view.y+=dy;clampView();
+  const v={x:dx/dt/view.s,y:dy/dt/view.s};
+  applyInertia((v.x-grab.vel.x)/dt,(v.y-grab.vel.y)/dt);
+  grab.vel=v;grab.last=p;grab.t=now;
+}
+function endGrab(){
+  if(!grab)return;
+  applyInertia(-grab.vel.x/0.06,-grab.vel.y/0.06);
+  grab=null;
+}
+
+/* ====== 引っ張りループ ====== */
+function nearestPullBody(wx,wy){
+  let best=null,bd=Infinity;
+  layers.forEach(L=>L.boneBodies.forEach(b=>{
+    if(b.isStatic)return;
+    const d=Math.hypot(b.position.x-wx,b.position.y-wy);
+    if(d<bd){bd=d;best=b;}
+  }));
+  if(!best||bd>70/view.s){
+    bd=Infinity;best=null;
+    layers.forEach(L=>L.allParts.forEach(b=>{
+      if(b.isStatic)return;
+      const d=Math.hypot(b.position.x-wx,b.position.y-wy);
+      if(d<bd){bd=d;best=b;}
+    }));
+    if(!best||bd>80/view.s)return null;
+  }
+  return best;
+}
+// クリック点に最も近いループを返す(始点近傍 or 矢印線上)
+function pullLoopAt(wx,wy){
+  const th=Math.max(12, 14/view.s);
+  let best=-1, bd=Infinity;
+  pullLoops.forEach((pl,i)=>{
+    // 始点距離
+    let d=Math.hypot(pl.ax-wx,pl.ay-wy);
+    // 線分距離
+    const vx=pl.bx-pl.ax, vy=pl.by-pl.ay, len2=vx*vx+vy*vy;
+    if(len2>0){
+      let t=((wx-pl.ax)*vx+(wy-pl.ay)*vy)/len2; t=Math.min(1,Math.max(0,t));
+      const ld=Math.hypot(wx-(pl.ax+t*vx), wy-(pl.ay+t*vy));
+      d=Math.min(d,ld);
+    }
+    if(d<bd){ bd=d; best=i; }
+  });
+  return bd<th ? best : -1;
+}
+function removePullLoop(i){
+  const pl=pullLoops[i];
+  if(pl && pl.con && engine) Composite.remove(engine.world,pl.con);
+  pullLoops.splice(i,1);
+}
+function addPullLoop(ax,ay,bx,by){
+  const body=nearestPullBody(ax,ay);
+  if(!body){ setStatus('始点の近くに動かせる点がありません。',true); return; }
+  pushUndo('pullloop');
+  const con=Constraint.create({pointA:{x:ax,y:ay},bodyB:body,stiffness:.05,damping:.1,length:0});
+  Composite.add(engine.world,con);
+  // 配置した瞬間のタイムライン位相を基準にし、t=0(始点)から動き出すようphaseを逆算
+  const phNow=pullTimelineSec*2*Math.PI/pullLoopPeriod;
+  const phase=(-phNow/6.28)%1; // updatePullLoopsの ph+phase*6.28 が0になるよう調整
+  pullLoops.push({ax,ay,bx,by, body, con,
+    axImg:ax/worldK, ayImg:ay/worldK, bxImg:bx/worldK, byImg:by/worldK, phase});
+  setStatus('引っ張りループを追加しました(今の位置から動作開始)。');
+}
+function rebuildPullLoops(){
+  // buildAll後にbody参照が無効になるので、画像座標から最寄りbodyを取り直す
+  pullLoops.forEach(pl=>{
+    pl.ax=pl.axImg*worldK; pl.ay=pl.ayImg*worldK;
+    pl.bx=pl.bxImg*worldK; pl.by=pl.byImg*worldK;
+    const body=nearestPullBody(pl.ax,pl.ay);
+    if(body){
+      pl.body=body;
+      pl.con=Constraint.create({pointA:{x:pl.ax,y:pl.ay},bodyB:body,stiffness:.05,damping:.1,length:0});
+      Composite.add(engine.world,pl.con);
+    } else pl.con=null;
+  });
+}
+function clearPullLoopCons(){
+  pullLoops.forEach(pl=>{ if(pl.con&&engine) Composite.remove(engine.world,pl.con); pl.con=null; });
+}
+function updatePullLoops(tSec, dtSec){
+  if(!engine) return;
+  if(!pullLoopsPaused && !pullTimelineScrub){
+    pullTimelineSec += dtSec;
+    // タイムラインのスライダー表示も追従(周期×1の範囲でループ表示)
+    const disp=((pullTimelineSec/pullLoopPeriod)%1+1)%1;
+    const tl=document.getElementById('pullLoopTimeline');
+    if(tl && document.activeElement!==tl){
+      tl.value=Math.round(disp*1000);
+      document.getElementById('pullLoopTimelineOut').textContent=Math.round(disp*100)+'%';
+    }
+  }
+  const ph=pullTimelineSec*2*Math.PI/pullLoopPeriod;
+  pullLoops.forEach(pl=>{
+    if(!pl.con) return;
+    const t=0.5-0.5*Math.cos(ph + pl.phase*6.28); // 0→1→0 往復
+    pl.con.pointA.x=pl.ax+(pl.bx-pl.ax)*t;
+    pl.con.pointA.y=pl.ay+(pl.by-pl.ay)*t;
+  });
+}
+
+/* ====== 引っ張る ====== */
+function startPull(w){
+  if(!engine)return false;
+  let best=null,bd=Infinity;
+  layers.forEach(L=>L.boneBodies.forEach(b=>{
+    if(b.isStatic)return;
+    const d=Math.hypot(b.position.x-w.x,b.position.y-w.y);
+    if(d<bd){bd=d;best=b;}
+  }));
+  if(!best||bd>70/view.s){
+    bd=Infinity;best=null;
+    layers.forEach(L=>L.allParts.forEach(b=>{
+      if(b.isStatic)return;
+      const d=Math.hypot(b.position.x-w.x,b.position.y-w.y);
+      if(d<bd){bd=d;best=b;}
+    }));
+    if(!best||bd>60/view.s)return false;
+  }
+  const con=Constraint.create({pointA:w,bodyB:best,stiffness:.07,damping:.1,length:0});
+  Composite.add(engine.world,con);
+  pull={con};
+  return true;
+}
+
+/* ====== ペイント ====== */
+function getSrcEditData(){
+  if(srcEditCache && srcEditCache.width===editW && srcEditCache.height===editH) return srcEditCache;
+  const c=document.createElement('canvas'); c.width=editW; c.height=editH;
+  c.getContext('2d').drawImage(srcImg,0,0,editW,editH);
+  srcEditCache=c.getContext('2d').getImageData(0,0,editW,editH);
+  return srcEditCache;
+}
+// 色フラッドフィル: クリック点と似た色の連結領域をマスクに反映
+// 色で選択(全体/連結なし): クリック色に近い画素を一括
+function maskFloodFill(ip, add, tol){
+  ensureMaskCv();
+  const sx=Math.min(editW-1,Math.max(0,Math.round(ip.x/imgW*editW)));
+  const sy=Math.min(editH-1,Math.max(0,Math.round(ip.y/imgH*editH)));
+  const src=getSrcEditData().data;
+  const idx0=(sy*editW+sx)*4;
+  const r0=src[idx0],g0=src[idx0+1],b0=src[idx0+2];
+  const tol2=tol*tol*3;
+  const mc=maskCanvas.getContext('2d');
+  const mImg=mc.getImageData(0,0,editW,editH);
+  const md=mImg.data;
+  const val=add?255:0;
+  for(let p=0;p<editW*editH;p++){
+    const i=p*4;
+    const dr=src[i]-r0,dg=src[i+1]-g0,db=src[i+2]-b0;
+    if(dr*dr+dg*dg+db*db<=tol2){ md[i]=255;md[i+1]=255;md[i+2]=255;md[i+3]=val; }
+  }
+  mc.putImageData(mImg,0,0);
+  refreshTintedMask(); buildAll();
+  setStatus(add?'似た色をマスクに追加しました。':'似た色をマスクから除外しました。');
+}
+// 囲み塗り: 既存マスクの境界で囲まれた内側を塗りつぶす
+// クリック点から「未マスク画素」を連結で広げ、画像の端に到達しなければ=囲まれた内側 とみなして塗る
+function maskEnclosedFill(ip, add){
+  ensureMaskCv();
+  const sx=Math.min(editW-1,Math.max(0,Math.round(ip.x/imgW*editW)));
+  const sy=Math.min(editH-1,Math.max(0,Math.round(ip.y/imgH*editH)));
+  const mc=maskCanvas.getContext('2d');
+  const mImg=mc.getImageData(0,0,editW,editH);
+  const md=mImg.data;
+  const masked=(p)=>md[p*4+3]>40; // すでにマスクされている画素=壁
+  const startP=sy*editW+sx;
+  if(add && masked(startP)){ setStatus('内側(まだ塗っていない場所)をクリックしてください。',true); return; }
+  // クリック点から同状態(未マスク or マスク)の連結領域を取得
+  const targetMasked = add ? false : true; // addなら未マスクを塗る/eraseならマスク済を消す
+  const region=[]; const seen=new Uint8Array(editW*editH);
+  const stack=[[sx,sy]]; let touchedEdge=false;
+  while(stack.length){
+    const [x,y]=stack.pop();
+    if(x<0||y<0||x>=editW||y>=editH){ touchedEdge=true; continue; }
+    const p=y*editW+x;
+    if(seen[p]) continue; seen[p]=1;
+    if(masked(p)!==targetMasked) continue; // 壁(反対状態)で止まる
+    region.push(p);
+    if(x===0||y===0||x===editW-1||y===editH-1) touchedEdge=true;
+    stack.push([x+1,y],[x-1,y],[x,y+1],[x,y-1]);
+  }
+  // addで端に到達した=囲まれていない(外側)。それでも塗ると全面になるので警告だけ出して実行はする
+  const val=add?255:0;
+  region.forEach(p=>{ const i=p*4; md[i]=255;md[i+1]=255;md[i+2]=255;md[i+3]=val; });
+  mc.putImageData(mImg,0,0);
+  refreshTintedMask(); buildAll();
+  if(add&&touchedEdge) setStatus('囲みが閉じていないため外側まで塗りました。筆で隙間なく囲ってから内側をクリックしてください。',true);
+  else setStatus(add?'囲まれた内側を塗りつぶしました。':'囲まれた内側を消しました。');
+}
+function ensureMaskCv(){
+  if(!maskCanvas){
+    maskCanvas=document.createElement('canvas');
+    maskCanvas.width=editW;maskCanvas.height=editH;
+    const mc=maskCanvas.getContext('2d');
+    mc.fillStyle='#fff';mc.fillRect(0,0,editW,editH);
+    refreshTintedMask();
+    defs.forEach(d=>{if(d.category==='person')d.useMask=true;});
+  }
+}
+function brushSize(id){return +document.getElementById(id).value;}
+function paintMask(a,b){
+  const c=maskCanvas.getContext('2d');
+  const p1=worldToEdit(a),p2=worldToEdit(b);
+  const rad=brushSize('maskBrush')/view.s/worldW*editW;
+  c.save();
+  c.globalCompositeOperation=maskMode==='erase'?'destination-out':'source-over';
+  c.strokeStyle='#fff';c.fillStyle='#fff';
+  c.lineWidth=rad*2;c.lineCap='round';c.lineJoin='round';
+  c.beginPath();c.moveTo(p1.x,p1.y);c.lineTo(p2.x,p2.y);c.stroke();
+  c.beginPath();c.arc(p2.x,p2.y,rad,0,7);c.fill();
+  c.restore();
+}
+function paintMark(a,b){
+  const cv=markCv[markSel];
+  const c=cv.getContext('2d');
+  const p1=worldToEdit(a),p2=worldToEdit(b);
+  const rad=Math.max(3,brushSize('markBrush')/view.s/worldW*editW);
+  const dist=Math.hypot(p2.x-p1.x,p2.y-p1.y);
+  const steps=Math.max(1,Math.ceil(dist/(rad*0.35)));
+  c.save();
+  c.globalCompositeOperation=markMode==='erase'?'destination-out':'source-over';
+  for(let i=0;i<=steps;i++){
+    const x=p1.x+(p2.x-p1.x)*i/steps,y=p1.y+(p2.y-p1.y)*i/steps;
+    const g=c.createRadialGradient(x,y,0,x,y,rad);
+    const op=(+document.getElementById('markOpacity').value)/100;
+    if(markMode==='erase'){
+      g.addColorStop(0,'rgba(255,255,255,'+op+')');
+      g.addColorStop(1,'rgba(255,255,255,0)');
+    }else{
+      g.addColorStop(0,hexA(MARK_COLORS[markSel],op));
+      g.addColorStop(1,hexA(MARK_COLORS[markSel],0));
+    }
+    c.fillStyle=g;
+    c.beginPath();c.arc(x,y,rad,0,7);c.fill();
+  }
+  c.restore();
+}
+function hexA(hex,a){
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return 'rgba('+r+','+g+','+b+','+a+')';
+}
+
+/* ====== ボーン編集 ====== */
+function findBoneAt(ip){
+  const th=Math.max(10,imgW*0.012);
+  for(const def of defs){
+    const i=def.bones.findIndex(seg=>distToSeg(ip,seg.a,seg.b)<th);
+    if(i>=0)return {def,i};
+  }
+  return null;
+}
+// 全レイヤーの全ボーン端点を集めて最近傍を返す
+function nearestBonePoint(ip){
+  let best=null,bd=Infinity;
+  defs.forEach(def=>{
+    def.bones=normBones(def.bones);
+    def.bones.forEach(seg=>['a','b'].forEach(key=>{
+      const p=seg[key];
+      const d=Math.hypot(p.x-ip.x,p.y-ip.y);
+      if(d<bd){bd=d;best={def,seg,key,p};}
+    }));
+  });
+  return best?{...best,dist:bd}:null;
+}
+function defAt(ip){
+  return defs.find(d=>{
+    const [bx,by,bw,bh]=d.bboxPct;
+    const x=bx/100*imgW,y=by/100*imgH,ww=bw/100*imgW,hh=bh/100*imgH;
+    return ip.x>=x&&ip.x<=x+ww&&ip.y>=y&&ip.y<=y+hh;
+  });
+}
+function isPinned(def,p){
+  return (def.pins||[]).some(q=>Math.hypot(q.x-p.x,q.y-p.y)<Math.max(14,imgW*0.018));
+}
+function togglePin(def,p){
+  def.pins=def.pins||[];
+  const th=Math.max(14,imgW*0.018);
+  const j=def.pins.findIndex(q=>Math.hypot(q.x-p.x,q.y-p.y)<th);
+  if(j>=0){ def.pins.splice(j,1); return false; }
+  def.pins.push({x:p.x,y:p.y}); return true;
+}
+// 画像座標ipにある球を探す
+function sphereEllDist(sp,px,py){
+  const rx=sp.rx||sp.r||30, ry=sp.ry||sp.r||30, rot=sp.rot||0;
+  const cosA=Math.cos(rot), sinA=Math.sin(rot);
+  const dx=px-sp.cx, dy=py-sp.cy;
+  const u=(dx*cosA+dy*sinA)/rx, v=(-dx*sinA+dy*cosA)/ry;
+  return Math.hypot(u,v);
+}
+function sphereAt(ip){
+  for(const def of defs){
+    const arr=def.spheres||[];
+    for(let i=arr.length-1;i>=0;i--){
+      if(sphereEllDist(arr[i],ip.x,ip.y)<1.0) return {def,i,sp:arr[i]};
+    }
+  }
+  return null;
+}
+function boneToolDown(w){
+  const ip=worldToImgPt(w);
+  const th=Math.max(14,imgW*0.02);
+  if(boneMode==='sphere'){
+    const hit=sphereAt(ip);
+    if(hit){ pushUndo('bones'); sphereDrag={def:hit.def, sp:hit.sp, ox:ip.x-hit.sp.cx, oy:ip.y-hit.sp.cy}; selSphere=hit.sp; syncSphereUI(); }
+    else { pushUndo('bones'); sphereDraw={def:defAt(ip), x0:ip.x, y0:ip.y, x1:ip.x, y1:ip.y}; }
+    return;
+  }
+  if(boneMode==='move'){
+    const np=nearestBonePoint(ip);
+    if(np&&np.dist<th){ pushUndo('bones'); boneDrag={def:np.def, pt:np.p}; }
+    else setStatus('動かせる骨の端点が近くにありません。',true);
+  }else if(boneMode==='add'){
+    // 既存点にスナップ(連結しやすく)
+    const np=nearestBonePoint(ip);
+    const snap=(np&&np.dist<th)?{x:np.p.x,y:np.p.y}:ip;
+    if(!bonePending){
+      bonePending=snap;
+      document.getElementById('boneHint').textContent='2点目をクリック…(既存点の近くで連結)';
+    }else{
+      const mid={x:(bonePending.x+snap.x)/2,y:(bonePending.y+snap.y)/2};
+      const def=defAt(mid)||defAt(bonePending)||defAt(snap);
+      if(def){
+        pushUndo('bones');
+        def.bones=normBones(def.bones);
+        def.bones.push({a:{x:bonePending.x,y:bonePending.y},b:{x:snap.x,y:snap.y},pinned:false});
+        buildAll();
+        setStatus('「'+def.label+'」に骨を追加しました。続けて描けます。');
+      }else setStatus('対象レイヤーの枠内に骨を引いてください。',true);
+      bonePending=null;
+      document.getElementById('boneHint').textContent='1点目をクリック…';
+    }
+  }else if(boneMode==='del'){
+    const sh=sphereAt(ip);
+    if(sh){ pushUndo('bones'); sh.def.spheres.splice(sh.i,1); if(selSphere===sh.sp)selSphere=null; buildAll(); setStatus('球ボーンを削除しました。'); return; }
+    const hit=findBoneAt(ip);
+    if(hit){ pushUndo('bones'); hit.def.bones.splice(hit.i,1); buildAll(); setStatus('骨を削除しました。'); }
+    else setStatus('近くに骨/球がありません。',true);
+  }else if(boneMode==='pin'){
+    const np=nearestBonePoint(ip);
+    if(np&&np.dist<th){
+      pushUndo('bones');
+      const on=togglePin(np.def,np.p);
+      buildAll();
+      setBoneMode('move'); // 1点固定/解除したら通常(移動)モードへ自動復帰
+      setStatus(on?'関節点を📌固定しました(赤=軸)。通常編集に戻りました。':'固定を解除しました。通常編集に戻りました。');
+    }else setStatus('近くに関節点がありません。骨の端点(丸)をクリック。',true);
+  }
+}
+
+/* ================= 自動揺れ ================= */
+const autoToggle=document.getElementById('autoToggle');
+let autoDistScale=1;
+autoToggle.addEventListener('click',()=>{
+  auto.on=!auto.on;
+  autoToggle.textContent=auto.on?'⏹ 停止':'▶ 開始';
+  autoToggle.classList.toggle('toggled',auto.on);
+  if(!auto.on){autoOff={x:0,y:0};autoPrev1={x:0,y:0};autoPrev2={x:0,y:0};}
+});
+document.getElementById('autoPattern').addEventListener('change',e=>auto.pattern=e.target.value);
+document.getElementById('autoDist').addEventListener('input',e=>{
+  auto.dist=+e.target.value*autoDistScale;
+  document.getElementById('autoDistOut').textContent=auto.dist+'px';
+});
+document.getElementById('autoDistX').addEventListener('click',e=>{
+  autoDistScale=autoDistScale>=4?1:autoDistScale*2;
+  e.target.textContent='×'+autoDistScale;
+  auto.dist=+document.getElementById('autoDist').value*autoDistScale;
+  document.getElementById('autoDistOut').textContent=auto.dist+'px';
+});
+document.getElementById('autoPeriod').addEventListener('input',e=>{
+  auto.period=e.target.value/10;
+  document.getElementById('autoPeriodOut').textContent=auto.period.toFixed(1)+'秒';
+});
+document.getElementById('autoZoomOn').addEventListener('change',e=>{ autoZoom.on=e.target.checked; });
+document.getElementById('autoZoomAmt').addEventListener('input',e=>{
+  autoZoom.amt=e.target.value/100;
+  document.getElementById('autoZoomAmtOut').textContent=e.target.value+'%';
+});
+document.getElementById('autoZoomPeriod').addEventListener('input',e=>{
+  autoZoom.period=e.target.value/10;
+  document.getElementById('autoZoomPeriodOut').textContent=autoZoom.period.toFixed(1)+'秒';
+});
+function updateAuto(tSec,dtSec){
+  if(!auto.on)return;
+  const A=auto.dist,ph=tSec*2*Math.PI/auto.period;
+  let target;
+  switch(auto.pattern){
+    case 'sway':target={x:A*Math.sin(ph),y:0};break;
+    case 'vert':target={x:0,y:A*Math.sin(ph)};break;
+    case 'circle':target={x:A*Math.sin(ph),y:A*0.7*Math.cos(ph)};break;
+    case 'fig8':target={x:A*Math.sin(ph),y:A*0.6*Math.sin(2*ph)};break;
+    case 'quake':
+      quakeT-=dtSec;
+      if(quakeT<=0){
+        quakeT=auto.period/4;
+        quakeTarget={x:(Math.random()-.5)*2*A,y:(Math.random()-.5)*2*A*.6};
+      }
+      target={x:autoOff.x+(quakeTarget.x-autoOff.x)*Math.min(1,dtSec*12),
+              y:autoOff.y+(quakeTarget.y-autoOff.y)*Math.min(1,dtSec*12)};
+      break;
+    default:target={x:0,y:0};
+  }
+  autoPrev2=autoPrev1;autoPrev1={...autoOff};autoOff=target;
+  const ax=(autoOff.x-2*autoPrev1.x+autoPrev2.x)/(dtSec*dtSec);
+  const ay=(autoOff.y-2*autoPrev1.y+autoPrev2.y)/(dtSec*dtSec);
+  applyInertia(ax,ay); // ズーム倍率に関わらず揺れの強さを一定に保つ
+  // ⑤ 自動拡大縮小(縦横揺れとは独立した位相で動き、描画スケールに乗算)
+  if(autoZoom.on){
+    const zp=tSec*2*Math.PI/autoZoom.period;
+    autoZoom.scale=1+autoZoom.amt*Math.sin(zp);
+  } else autoZoom.scale=1;
+}
+
+/* ================= センサー ================= */
+document.getElementById('sensorBtn').addEventListener('click',async()=>{
+  try{
+    if(typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function'){
+      const p=await DeviceMotionEvent.requestPermission();
+      if(p!=='granted'){setStatus('センサーの許可が得られませんでした。',true);return;}
+    }
+    window.addEventListener('devicemotion',onMotion);
+    sensorOn=true;
+    const pill=document.getElementById('sensorPill');
+    pill.textContent='接続中';pill.classList.add('on');
+    setStatus('センサー連動を開始しました。');
+  }catch(e){
+    setStatus('この環境ではセンサーを使えません(https必須)。',true);
+  }
+});
+let lastShakeT=0;
+function onMotion(e){
+  const g=e.accelerationIncludingGravity;
+  if(g&&g.x!==null){
+    gBase.x=clampN(-g.x/9.8,-1.5,1.5);
+    gBase.y=clampN(g.y/9.8,-1.5,1.5);
+  }
+  const a=e.acceleration;
+  if(a&&a.x!==null){
+    const mag=Math.hypot(a.x,a.y,a.z);
+    if(mag>12&&performance.now()-lastShakeT>250){
+      lastShakeT=performance.now();
+      impulse(Math.min(mag/12,3));
+    }
+  }
+}
+function clampN(v,a,b){return Math.min(b,Math.max(a,v));}
+function impulse(k=1){
+  inertiaPulse=Math.min(3,inertiaPulse+k*.6);
+  layers.forEach(L=>{
+    const fx=(Math.random()-.5)*0.05*k,fy=(Math.random()-.5)*0.03*k;
+    for(let r=0;r<Math.ceil(L.rows/2);r++){
+      const wgt=1-r/L.rows;
+      for(let c=0;c<=L.cols;c++){
+        const b=L.parts[r][c];
+        if(!b.isStatic){ const sd=(b._swayDir||1); Body.applyForce(b,b.position,{x:fx*b.mass*wgt*8*(b._sway||1)*sd,y:fy*b.mass*wgt*8*(b._sway||1)*sd}); }
+      }
+    }
+  });
+}
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  layers.forEach(L=>{
+    for(let r=0;r<=L.rows;r++)for(let c=0;c<=L.cols;c++){
+      const b=L.parts[r][c],hp=L.homes[r][c];
+      Body.setPosition(b,{x:hp.x,y:hp.y});
+      Body.setVelocity(b,{x:0,y:0});
+    }
+    L.boneNodes.forEach(n=>{
+      Body.setPosition(n.body,{x:n.home.x,y:n.home.y});
+      Body.setVelocity(n.body,{x:0,y:0});
+    });
+    L.boneSegsB.forEach(bs=>{bs.z.ang=0;bs.z.vel=0;bs.con.length=bs.con._rest;});
+  });
+  gBase={x:0,y:1};
+});
+
+/* ================= 枠追加 ================= */
+function showChooser(clientX,clientY){
+  chooser.style.display='block';
+  const cw=220,ch=190;
+  chooser.style.left=Math.min(Math.max(clientX-cw/2,8),window.innerWidth-cw-8)+'px';
+  chooser.style.top=Math.min(Math.max(clientY+10,8),window.innerHeight-ch-8)+'px';
+}
+function hideChooser(){chooser.style.display='none';drawRect=null;pendingRect=null;}
+const manualCount={};
+chooser.querySelectorAll('button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const cat=btn.dataset.cat;
+    if(cat==='cancel'||!pendingRect){hideChooser();return;}
+    manualCount[cat]=(manualCount[cat]||0)+1;
+    const bboxPct=[pendingRect.x/worldW*100,pendingRect.y/worldH*100,pendingRect.w/worldW*100,pendingRect.h/worldH*100];
+    const bboxPx={x:bboxPct[0]/100*imgW,y:bboxPct[1]/100*imgH,w:bboxPct[2]/100*imgW,h:bboxPct[3]/100*imgH};
+    const pose=cat==='person'?matchPose(bboxPx):null;
+    const def={
+      label:CAT_LABEL[cat]+(manualCount[cat]>1?'('+manualCount[cat]+')':'')+' *手動',
+      category:cat,bboxPct,
+      params:Object.assign({anchored:true},PHYS_DEFAULT[cat]),
+      bones:pose?boneSegments(pose).segs:[],
+      pins:pose?boneSegments(pose).pins:[],
+      useMask:cat==='person'&&!!maskCanvas,
+    };
+    defs.push(def);
+    buildLayer(def);
+      setStatus('「'+CAT_LABEL[cat]+'」を追加しました。');
+    hideChooser();
+  });
+});
+
+/* ================= 描画 ================= */
+function drawTexTri(img,sx0,sy0,sx1,sy1,sx2,sy2,dx0,dy0,dx1,dy1,dx2,dy2){
+  const cx=(dx0+dx1+dx2)/3,cy=(dy0+dy1+dy2)/3,e=1.025;
+  dx0=cx+(dx0-cx)*e;dy0=cy+(dy0-cy)*e;
+  dx1=cx+(dx1-cx)*e;dy1=cy+(dy1-cy)*e;
+  dx2=cx+(dx2-cx)*e;dy2=cy+(dy2-cy)*e;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(dx0,dy0);ctx.lineTo(dx1,dy1);ctx.lineTo(dx2,dy2);
+  ctx.closePath();ctx.clip();
+  const den=sx0*(sy1-sy2)+sx1*(sy2-sy0)+sx2*(sy0-sy1);
+  if(Math.abs(den)<1e-6){ctx.restore();return;}
+  const a=(dx0*(sy1-sy2)+dx1*(sy2-sy0)+dx2*(sy0-sy1))/den;
+  const b=(dy0*(sy1-sy2)+dy1*(sy2-sy0)+dy2*(sy0-sy1))/den;
+  const c=(dx0*(sx2-sx1)+dx1*(sx0-sx2)+dx2*(sx1-sx0))/den;
+  const d=(dy0*(sx2-sx1)+dy1*(sx0-sx2)+dy2*(sx1-sx0))/den;
+  const ee=dx0-a*sx0-c*sy0;
+  const f=dy0-b*sx0-d*sy0;
+  ctx.transform(a,b,c,d,ee,f);
+  ctx.drawImage(img,0,0);
+  ctx.restore();
+}
+
+let lastT=0;
+function loop(t){
+  if(!running)return;
+  try{
+  const dt=Math.min(t-lastT,33);lastT=t;
+  const dtSec=(dt||16.6)/1000;
+  if(!physPaused){
+    updateAuto(t/1000,dtSec);
+    updateDepthSway(dtSec);
+    updatePoseAnim(t/1000);
+  }
+  updatePullLoops(t/1000, dtSec);
+  if(engine){
+    if(!physPaused) Engine.update(engine,dt||16.6);
+    else if(poseDrag||boneDrag||pull) Engine.update(engine,10); // 静止中でも引っ張り/編集時はソルバを回す
+  }
+  // 楕円追従は物理ソルバの後に適用(ボーンの最終位置に合わせて確実に変形させる)
+  if(engine) updateSphereWobble(dtSec);
+  }catch(err){ console.error('update error',err); }
+
+  try{
+  const W=winW(),H=winH();
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle=bgColor;
+  ctx.fillRect(0,0,W,H);
+  if(!srcImg){ requestAnimationFrame(loop); return; }
+  // 自動拡縮を含む実効変換(toWorldと同じ式を使い、入力とズレないようにする)
+  ctx.setTransform(effScale(),0,0,effScale(),effOffX(),effOffY());
+
+  if(bgMode==='custom'&&bgImage){
+    ctx.save();
+    ctx.beginPath();ctx.rect(0,0,worldW,worldH);ctx.clip();
+    const sc=Math.max(worldW/bgImage.width,worldH/bgImage.height);
+    const bw2=bgImage.width*sc,bh2=bgImage.height*sc;
+    ctx.drawImage(bgImage,(worldW-bw2)/2,(worldH-bh2)/2,bw2,bh2);
+    ctx.restore();
+  }else if(bgMode==='clean'){
+    ensureBgClean();
+    if(bgClean)ctx.drawImage(bgClean,0,0,worldW,worldH);
+    else{ctx.globalAlpha=.25;ctx.drawImage(srcImg,0,0,worldW,worldH);ctx.globalAlpha=1;}
+  }else if(bgMode!=='none'){
+    ctx.globalAlpha=bgMode==='bright'?1:.25;
+    ctx.drawImage(srcImg,0,0,worldW,worldH);
+    ctx.globalAlpha=1;
+  }
+
+  const debug=document.getElementById('dbgMesh').checked;
+  const confirm=document.getElementById('dbgConfirm').checked;
+
+  layers.forEach(L=>{
+    const iu=L.img.width/L.cols,iv=L.img.height/L.rows;
+    for(let r=0;r<L.rows;r++)for(let c=0;c<L.cols;c++){
+      if(L.cellVis&&!L.cellVis[r][c]) continue;
+      const p00=L.parts[r][c].position,p10=L.parts[r][c+1].position;
+      const p01=L.parts[r+1][c].position,p11=L.parts[r+1][c+1].position;
+      const u0=c*iu,v0=r*iv,u1=(c+1)*iu,v1=(r+1)*iv;
+      drawTexTri(L.img,u0,v0,u1,v0,u1,v1,p00.x,p00.y,p10.x,p10.y,p11.x,p11.y);
+      drawTexTri(L.img,u0,v0,u1,v1,u0,v1,p00.x,p00.y,p11.x,p11.y,p01.x,p01.y);
+    }
+  });
+
+  if(confirm||tool==='mask'){
+    // マスクツール中は範囲をはっきり見せる(薄いと塗った場所が分からないため)
+    const al=(tool==='mask')?.5:.32;
+    if(tintedMask){ctx.globalAlpha=al;ctx.drawImage(tintedMask,0,0,worldW,worldH);ctx.globalAlpha=1;}
+  }
+  if(confirm||tool==='mark'){
+    markCv.forEach(cv=>{if(cv){ctx.globalAlpha=.65;ctx.drawImage(cv,0,0,worldW,worldH);}});
+    ctx.globalAlpha=1;
+  }
+
+  if(debug){
+    layers.forEach(L=>{
+      ctx.lineWidth=1/view.s;
+      for(let r=0;r<=L.rows;r++)for(let c=0;c<L.cols;c++){
+        const a=L.parts[r][c].position,b=L.parts[r][c+1].position;
+        const m=(L.mults[r][c]+L.mults[r][c+1])/2;
+        ctx.strokeStyle=L.color;
+        ctx.globalAlpha=Math.min(.9,.15+(m-.3)/2*.7);
+        ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+      }
+      for(let r=0;r<L.rows;r++)for(let c=0;c<=L.cols;c++){
+        const a=L.parts[r][c].position,b=L.parts[r+1][c].position;
+        const m=(L.mults[r][c]+L.mults[r+1][c])/2;
+        ctx.strokeStyle=L.color;
+        ctx.globalAlpha=Math.min(.9,.15+(m-.3)/2*.7);
+        ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();
+      }
+      ctx.globalAlpha=1;
+    });
+  }
+
+  if(debug||tool==='bone'||physPaused){
+    const editingBones=(tool==='bone'&&!modelPlace);
+    layers.forEach(L=>{
+      L.boneSegsB.forEach(bs=>{
+        const pinned=bs.seg.pinned;
+        ctx.strokeStyle=pinned?'#6EE7D8':'#FFFFFF';
+        ctx.globalAlpha=.85;
+        ctx.lineWidth=(pinned?3.5:2.5)/view.s;
+        ctx.beginPath();
+        ctx.moveTo(bs.pair[0].body.position.x,bs.pair[0].body.position.y);
+        ctx.lineTo(bs.pair[1].body.position.x,bs.pair[1].body.position.y);
+        ctx.stroke();
+      });
+      L.boneNodes.forEach(n=>{
+        ctx.fillStyle=n.pinned?'#FF5577':'#fff';
+        ctx.beginPath();ctx.arc(n.body.position.x,n.body.position.y,(n.pinned?5:3.5)/view.s,0,7);ctx.fill();
+      });
+      ctx.globalAlpha=1;
+    });
+    // ボーン編集モード: 編集対象のホーム端点を掴みやすい大きな丸で表示(固定は赤)
+    if(editingBones){
+      defs.forEach(def=>{
+        normBones(def.bones).forEach(seg=>['a','b'].forEach(key=>{
+          const p=seg[key];
+          const wp=imgToWorld(p);
+          const pinned=isPinned(def,p);
+          ctx.fillStyle=pinned?'#FF5577':'#6EE7D8';
+          ctx.globalAlpha=.95;
+          ctx.beginPath();ctx.arc(wp.x,wp.y,7/view.s,0,7);ctx.fill();
+          ctx.strokeStyle='#0E1220';ctx.lineWidth=1.5/view.s;ctx.stroke();
+        }));
+      });
+      ctx.globalAlpha=1;
+    }
+    if(bonePending){
+      const a=imgToWorld(bonePending);
+      ctx.fillStyle='#FFB454';
+      ctx.beginPath();ctx.arc(a.x,a.y,7/view.s,0,7);ctx.fill();
+    }
+    // 楕円ボーン表示
+    layers.forEach(L=>{
+      (L.sphereObjs||[]).forEach(o=>{
+        const sp=o.sp, sel=(sp===selSphere);
+        const c=imgToWorld({x:sp.cx,y:sp.cy});
+        const rx=(sp.rx||40)*worldK, ry=(sp.ry||40)*worldK, rot=sp.rot||0;
+        ctx.strokeStyle=sel?'#FFB454':'#67B7FF';
+        ctx.globalAlpha=.9; ctx.lineWidth=(sel?2.5:1.8)/view.s;
+        ctx.save();
+        ctx.translate(c.x,c.y); ctx.rotate(rot);
+        ctx.beginPath(); ctx.ellipse(0,0,rx,ry,0,0,7); ctx.stroke();
+        ctx.restore();
+        // 連動する点ボーンへの線(どの点に従属しているか可視化)
+        if(o.anchor&&o.anchor.body){
+          const a=o.anchor.body.position;
+          ctx.strokeStyle=sel?'#FFB454':'#67B7FF'; ctx.globalAlpha=.5;
+          ctx.setLineDash([4/view.s,3/view.s]); ctx.lineWidth=1.2/view.s;
+          ctx.beginPath();ctx.moveTo(c.x,c.y);ctx.lineTo(a.x,a.y);ctx.stroke();
+          ctx.setLineDash([]);
+          // アンカー点を強調
+          ctx.fillStyle=sel?'#FFB454':'#67B7FF'; ctx.globalAlpha=.9;
+          ctx.beginPath();ctx.arc(a.x,a.y,4/view.s,0,7);ctx.fill();
+        }
+      });
+      ctx.globalAlpha=1;
+    });
+  }
+
+  if(drawRect){
+    ctx.setLineDash([6/view.s,4/view.s]);
+    ctx.strokeStyle='#6EE7D8';ctx.lineWidth=2/view.s;
+    ctx.strokeRect(drawRect.x,drawRect.y,drawRect.w,drawRect.h);
+    ctx.setLineDash([]);
+  }
+  if(sphereDraw){
+    const cx=(sphereDraw.x0+sphereDraw.x1)/2, cy=(sphereDraw.y0+sphereDraw.y1)/2;
+    const rx=Math.abs(sphereDraw.x1-sphereDraw.x0)/2, ry=Math.abs(sphereDraw.y1-sphereDraw.y0)/2;
+    const c=imgToWorld({x:cx,y:cy});
+    ctx.setLineDash([5/view.s,4/view.s]);
+    ctx.strokeStyle='#67B7FF';ctx.lineWidth=2/view.s;
+    ctx.beginPath();ctx.ellipse(c.x,c.y,rx*worldK,ry*worldK,0,0,7);ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // 引っ張りループの矢印
+  if(appMode==='edit'&&(tool==='pullloop'||pullLoops.length)){
+    const drawArrow=(ax,ay,bx,by,active)=>{
+      ctx.strokeStyle=active?'#FFB454':'#FF7A9E'; ctx.fillStyle=ctx.strokeStyle;
+      ctx.globalAlpha=.9; ctx.lineWidth=2.5/view.s;
+      ctx.beginPath();ctx.moveTo(ax,ay);ctx.lineTo(bx,by);ctx.stroke();
+      const ang=Math.atan2(by-ay,bx-ax), hl=12/view.s;
+      ctx.beginPath();ctx.moveTo(bx,by);
+      ctx.lineTo(bx-hl*Math.cos(ang-0.4),by-hl*Math.sin(ang-0.4));
+      ctx.lineTo(bx-hl*Math.cos(ang+0.4),by-hl*Math.sin(ang+0.4));
+      ctx.closePath();ctx.fill();
+      ctx.beginPath();ctx.arc(ax,ay,5/view.s,0,7);ctx.fill(); // 始点
+      ctx.globalAlpha=1;
+    };
+    pullLoops.forEach(pl=>drawArrow(pl.ax,pl.ay,pl.bx,pl.by,false));
+    if(pullLoopDraw) drawArrow(pullLoopDraw.ax,pullLoopDraw.ay,pullLoopDraw.bx,pullLoopDraw.by,true);
+  }
+  if(appMode==='edit'&&(tool==='mask'||tool==='mark')&&hoverPt){
+    const sz=brushSize(tool==='mask'?'maskBrush':'markBrush')/view.s;
+    ctx.strokeStyle=tool==='mask'?'#6EE7D8':MARK_COLORS[markSel];
+    ctx.lineWidth=1.5/view.s;
+    ctx.beginPath();ctx.arc(hoverPt.x,hoverPt.y,sz,0,7);ctx.stroke();
+  }
+
+  ctx.setTransform(1,0,0,1,0,0);
+  drawNeedle();
+  }catch(err){ console.error('draw error',err); }
+  requestAnimationFrame(loop);
+}
+function drawNeedle(){
+  nctx.clearRect(0,0,50,50);
+  nctx.strokeStyle='#2A3350';nctx.beginPath();nctx.arc(25,25,20,0,7);nctx.stroke();
+  const m=Math.min(Math.hypot(gBase.x,gBase.y),1.6);
+  const a=Math.atan2(gBase.y,gBase.x);
+  nctx.strokeStyle='#6EE7D8';nctx.lineWidth=3;nctx.beginPath();
+  nctx.moveTo(25,25);nctx.lineTo(25+Math.cos(a)*13*m,25+Math.sin(a)*13*m);nctx.stroke();
+  nctx.lineWidth=1;
+}
+
+/* ================= 可変レンジスライダー共通 ================= */
+function initScaleOf(v){ return v<=1?1:v<=2?2:4; }
+function scaledSliderHtml(label,key,val){
+  const sc=initScaleOf(val);
+  return '<div class="slider-line"><label>'+label+'</label>'+
+    '<input type="range" min="0" max="100" value="'+Math.round(val/sc*100)+'" data-key="'+key+'" data-scale="'+sc+'">'+
+    '<button class="rngx" data-for="'+key+'">×'+sc+'</button>'+
+    '<output>'+val.toFixed(2)+'</output></div>';
+}
+function bindScaledSliders(rootEl, onChange){
+  rootEl.querySelectorAll('input[type=range][data-key]').forEach(r=>{
+    r.addEventListener('input',()=>{
+      const sc=+r.dataset.scale;
+      const v=r.value/100*sc;
+      r.parentElement.querySelector('output').value=v.toFixed(2);
+      onChange(r.dataset.key,v);
+    });
+  });
+  rootEl.querySelectorAll('button.rngx[data-for]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const r=rootEl.querySelector('input[data-key="'+btn.dataset.for+'"]');
+      const sc=+r.dataset.scale;
+      const cur=r.value/100*sc;
+      const ns=sc>=4?1:sc*2;
+      r.dataset.scale=ns;
+      btn.textContent='×'+ns;
+      r.value=Math.max(0,Math.min(100,Math.round(cur/ns*100)));
+      const v=r.value/100*ns;
+      r.parentElement.querySelector('output').value=v.toFixed(2);
+      onChange(btn.dataset.for,v);
+    });
+  });
+}
+
+/* ================= マーキング設定 ================= */
+function buildMarkCard(){
+  const list=document.getElementById('markList');
+  list.innerHTML='';
+  markInfo.forEach((mi,i)=>{
+    const el=document.createElement('div');
+    el.style.marginTop=i?'8px':'0';
+    el.innerHTML=
+      '<div style="font-size:11px;font-weight:700;"><span class="chip" style="background:'+MARK_COLORS[i]+'"></span>'+MARK_NAMES[i]+'</div>'+
+      scaledSliderHtml('硬さ倍率','stiff'+i,mi.stiffMult)+
+      scaledSliderHtml('質量倍率','mass'+i,mi.massMult)+
+      scaledSliderHtml('揺れ増幅','sway'+i,mi.swayMult);
+    list.appendChild(el);
+    bindScaledSliders(el,(key,v)=>{
+      if(key==='stiff'+i)mi.stiffMult=Math.max(.05,v);
+      if(key==='mass'+i)mi.massMult=Math.max(.05,v);
+      if(key==='sway'+i)mi.swayMult=Math.max(.05,v);
+      clearTimeout(el._t);
+      el._t=setTimeout(updatePhysicsMaps,150);
+    });
+  });
+}
+
+/* ================= 対象物カード ================= */
+function appendCard(L){
+  document.getElementById('objCard').style.display='block';
+  const list=document.getElementById('objList');
+  const el=document.createElement('div');
+  el.className='obj';
+  el.style.setProperty('--c',L.color);
+  const tags=[L.cols+'×'+L.rows];
+  if(L.def.useMask&&maskCanvas)tags.push('切出');
+  if(L.def.bones.length)tags.push('骨'+L.def.bones.length+(L.hasPinnedBone?'📌':''));
+  el.innerHTML=
+    '<div class="head"><span class="name">'+esc(L.label)+'</span><span class="cat">'+(CAT_LABEL[L.category]||L.category)+' / '+tags.join('/')+'</span></div>'+
+    scaledSliderHtml('重力影響','grav',L.params.gravityScale)+
+    scaledSliderHtml('硬さ','stiff',L.params.stiffness)+
+    scaledSliderHtml('関節の硬さ','joint',L.params.jointStiff)+
+    scaledSliderHtml('奥行き揺れ','depth',L.params.depthSway)+
+    scaledSliderHtml('質量','dens',L.params.density)+
+    scaledSliderHtml('反発','rest',L.params.restitution)+
+    '<div class="foot">'+
+      '<button data-act="anchor">'+(L.params.anchored?'📌 固定: ON':'🍃 固定: OFF')+'</button>'+
+      '<button data-act="kick">⚡ つつく</button>'+
+      '<button data-act="remove" class="warn">🗑 削除</button>'+
+    '</div>';
+  list.appendChild(el);
+
+  bindScaledSliders(el,(k,v)=>{
+    if(k==='grav')L.params.gravityScale=v;
+    if(k==='stiff'){
+      L.params.stiffness=v;
+      const gk=gridK(v),hk=homeK(v);
+      L.gridCons.forEach(con=>{
+        const m=(L.mults[con._va.r][con._va.c]+L.mults[con._vb.r][con._vb.c])/2;
+        con.stiffness=Math.min(.98,(con._shear?gk*.7:gk)*m);
+      });
+      L.homeCons.forEach(con=>{con.stiffness=hk*L.mults[con._v.r][con._v.c]/L.swayFs[con._v.r][con._v.c];});
+      L.boneCons.forEach(con=>{con.stiffness=.55+.4*Math.min(1,v);});
+    }
+    if(k==='joint'){
+      L.params.jointStiff=v;
+      L.bendCons.forEach(con=>{con.stiffness=jointKf(v);});
+    }
+    if(k==='depth')L.params.depthSway=v;
+    if(k==='dens'){
+      L.params.density=v;
+      const total=1+v*9;
+      L.pmBase=Math.max(.12,total/L.allParts.length);
+      for(let rr=0;rr<L.rows;rr++)for(let cc=0;cc<=L.cols;cc++){
+        const b=L.parts[rr][cc];
+        if(b.isStatic)continue;
+        const mNorm=(L.mults[rr][cc]-0.55)/1.05;
+        Body.setMass(b,Math.max(.05,L.pmBase*(0.6+0.8*Math.min(mNorm,2))*L.massFs[rr][cc]));
+      }
+      L.boneNodes.forEach(n=>{if(!n.body.isStatic)Body.setMass(n.body,L.pmBase*2.2);});
+    }
+    if(k==='rest'){
+      L.params.restitution=v;
+      L.allParts.forEach(b=>{b.restitution=Math.min(1,v);});
+    }
+  });
+
+  el.querySelector('[data-act=anchor]').addEventListener('click',ev=>{
+    L.params.anchored=!L.params.anchored;
+    if(L.hasPinnedBone){
+      L.boneNodes.forEach(n=>{
+        if(!n.pinned)return;
+        if(L.params.anchored){
+          Body.setPosition(n.body,{x:n.home.x,y:n.home.y});
+          Body.setVelocity(n.body,{x:0,y:0});
+          Body.setStatic(n.body,true);
+        }else Body.setStatic(n.body,false);
+      });
+    }else{
+      for(let c=0;c<=L.cols;c++){
+        const b=L.parts[L.rows][c];
+        if(L.params.anchored){
+          Body.setPosition(b,{x:L.homes[L.rows][c].x,y:L.homes[L.rows][c].y});
+          Body.setVelocity(b,{x:0,y:0});
+          Body.setStatic(b,true);
+        }else Body.setStatic(b,false);
+      }
+    }
+    if(L.params.anchored)Composite.add(engine.world,L.homeCons);
+    else L.homeCons.forEach(con=>Composite.remove(engine.world,con));
+    ev.target.textContent=L.params.anchored?'📌 固定: ON':'🍃 固定: OFF';
+  });
+  el.querySelector('[data-act=kick]').addEventListener('click',()=>{
+    for(let c=0;c<=L.cols;c++){
+      const b=L.parts[0][c];
+      if(!b.isStatic)Body.applyForce(b,b.position,{x:(Math.random()-.5)*.3*b.mass,y:-.15*b.mass});
+    }
+    inertiaPulse=Math.min(3,inertiaPulse+1);
+  });
+  el.querySelector('[data-act=remove]').addEventListener('click',()=>{
+    L.allParts.forEach(b=>Composite.remove(engine.world,b));
+    L.boneBodies.forEach(b=>Composite.remove(engine.world,b));
+    L.gridCons.concat(L.homeCons,L.boneCons,L.bendCons,L.skinCons).forEach(con=>Composite.remove(engine.world,con));
+    layers=layers.filter(x=>x!==L);
+    defs=defs.filter(d=>d!==L.def);
+    el.remove();
+    if(!layers.length)document.getElementById('objCard').style.display='none';
+  });
+}
+function esc(s){return String(s).replace(/[<>&"]/g,function(c){return {'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c];});}
+
+
+/* ================= 余白拡張(可動域を広げる) ================= */
+function expandCanvas(){
+  if(!srcImg) return;
+  const padX=Math.round(baseW*0.1), padT=Math.round(baseH*0.1);
+  const nw=imgW+padX*2, nh=imgH+padT;
+  const nc=document.createElement('canvas'); nc.width=nw; nc.height=nh;
+  const c=nc.getContext('2d');
+  // 端の色をブラーで引き伸ばした下地 → その上に元画像
+  c.filter='blur(40px)';
+  c.drawImage(srcImg,-nw*0.06,-nh*0.06,nw*1.12,nh*1.12);
+  c.filter='none';
+  c.drawImage(srcImg,padX,padT,imgW,imgH);
+  const oldW=imgW, oldH=imgH;
+  defs.forEach(d=>{
+    const [bx,by,bw,bh]=d.bboxPct;
+    d.bboxPct=[(bx/100*oldW+padX)/nw*100,(by/100*oldH+padT)/nh*100, bw*oldW/nw, bh*oldH/nh];
+    d.bones=normBones(d.bones).map(sg=>({a:{x:sg.a.x+padX,y:sg.a.y+padT},b:{x:sg.b.x+padX,y:sg.b.y+padT},pinned:!!sg.pinned}));
+    d.pins=(d.pins||[]).map(p=>({x:p.x+padX,y:p.y+padT}));
+  });
+  const es=Math.min(EDIT_RES/Math.max(nw,nh),1);
+  const nEW=Math.round(nw*es), nEH=Math.round(nh*es);
+  function remap(cv){
+    if(!cv) return null;
+    const n2=document.createElement('canvas'); n2.width=nEW; n2.height=nEH;
+    n2.getContext('2d').drawImage(cv, padX/nw*nEW, padT/nh*nEH, oldW/nw*nEW, oldH/nh*nEH);
+    return n2;
+  }
+  maskCanvas=remap(maskCanvas);
+  markCv=markCv.map(cv=>remap(cv)||(()=>{const c2=document.createElement('canvas');c2.width=nEW;c2.height=nEH;return c2;})());
+  srcImg=nc; imgW=nw; imgH=nh; editW=nEW; editH=nEH; srcEditCache=null;
+  worldK=Math.min((winW()-40)/imgW,(winH()-40)/imgH,1);
+  worldW=imgW*worldK; worldH=imgH*worldK;
+  refreshMarkCache(); refreshTintedMask();
+  fitView(); buildAll(); expandN++;
+  setStatus('上・左右に余白を拡張しました(累計'+expandN+'回)。可動域が広がります。');
+}
+document.getElementById('expandBtn').addEventListener('click',expandCanvas);
+
+/* ================= マスクなめらか化 ================= */
+function smoothMask(){
+  if(!maskCanvas){ setStatus('マスクがありません。先に✂️マスクで作成してください。',true); return; }
+  pushUndo('mask');
+  const tmp=document.createElement('canvas'); tmp.width=editW; tmp.height=editH;
+  const tc=tmp.getContext('2d');
+  tc.filter='blur(2.5px)';
+  tc.drawImage(maskCanvas,0,0);
+  tc.filter='none';
+  const id=tc.getImageData(0,0,editW,editH);
+  const d=id.data;
+  for(let i=3;i<d.length;i+=4){
+    const t=Math.min(1,Math.max(0,(d[i]-96)/64));
+    d[i]=Math.round(t*t*(3-2*t)*255); // スムーズステップで輪郭を丸める
+    d[i-1]=255; d[i-2]=255; d[i-3]=255;
+  }
+  tc.putImageData(id,0,0);
+  maskCanvas=tmp;
+  refreshTintedMask(); buildAll();
+  setStatus('マスクの輪郭をなめらかにしました(連打でさらに)。');
+}
+document.getElementById('maskSmooth').addEventListener('click',smoothMask);
+
+/* ================= ポーズアニメ(キーフレームループ) ================= */
+function recordPose(slot){
+  let n=0;
+  layers.forEach(L=>{
+    if(!L.boneNodes.length) return;
+    // ボーンノードの位置のみ記録(メッシュはスキニングで追従するので記録しない=テクスチャ破綻を防ぐ)
+    L['pose'+slot]=L.boneNodes.map(nd=>({x:nd.body.position.x,y:nd.body.position.y}));
+    n++;
+  });
+  setStatus(n?('ボーンの形をポーズ'+slot+'として記録しました。🤏引っ張るで作ってから記録するのがコツです。'):'ボーン付きレイヤーがありません。',!n);
+}
+function updatePoseAnim(tSec){
+  if(!anim.on) return;
+  const ph=0.5-0.5*Math.cos((tSec-anim.t0)*2*Math.PI/anim.period);
+  const k=0.02; // ボーン誘導を強めて大きなポーズ差でも追従(メッシュはスキニングで付いてくる)
+  layers.forEach(L=>{
+    if(!L.poseA||!L.poseB) return;
+    L.boneNodes.forEach((nd,i)=>{
+      if(nd.body.isStatic) return;
+      const a=L.poseA[i], b=L.poseB[i];
+      if(!a||!b) return;
+      const tx=a.x+(b.x-a.x)*ph, ty=a.y+(b.y-a.y)*ph;
+      Body.applyForce(nd.body,nd.body.position,{
+        x:(tx-nd.body.position.x)*k*nd.body.mass,
+        y:(ty-nd.body.position.y)*k*nd.body.mass});
+    });
+  });
+}
+document.getElementById('poseA').addEventListener('click',()=>recordPose('A'));
+document.getElementById('poseB').addEventListener('click',()=>recordPose('B'));
+function recallPose(slot){
+  // ボーンノードのみ記録位置へ戻す(メッシュはスキニングで追従)。物理は止めずバネ誘導で寄せる
+  let n=0;
+  layers.forEach(L=>{
+    const pose=L['pose'+slot];
+    if(!pose) return;
+    L.boneNodes.forEach((nd,i)=>{
+      if(pose[i]){ Body.setPosition(nd.body,{x:pose[i].x,y:pose[i].y}); Body.setVelocity(nd.body,{x:0,y:0}); }
+    });
+    n++;
+  });
+  setStatus(n?('ポーズ'+slot+'のボーン配置を呼び戻しました。🤏引っ張るで調整し再記録できます。'):('ポーズ'+slot+'は未記録です。'),!n);
+}
+document.getElementById('poseRecallA').addEventListener('click',()=>recallPose('A'));
+document.getElementById('poseRecallB').addEventListener('click',()=>recallPose('B'));
+const poseLoopBtn=document.getElementById('poseLoop');
+poseLoopBtn.addEventListener('click',()=>{
+  const has=layers.some(L=>L.poseA&&L.poseB);
+  if(!anim.on&&!has){ setStatus('先に🅰と🅱の両方のポーズを記録してください。',true); return; }
+  anim.on=!anim.on;
+  if(anim.on){
+    anim.t0=performance.now()/1000;
+    physPaused=false;
+    const pe=document.getElementById('poseEdit');
+    pe.textContent='❄ その場で静止'; pe.classList.remove('toggled');
+    zeroAllVel();
+  }
+  poseLoopBtn.textContent=anim.on?'⏹ 停止':'▶ ループ再生';
+  poseLoopBtn.classList.toggle('toggled',anim.on);
+});
+document.getElementById('animPeriod').addEventListener('input',e=>{
+  anim.period=e.target.value/10;
+  document.getElementById('animPeriodOut').textContent=anim.period.toFixed(1)+'秒';
+});
+
+
+/* ================= 編集時の動き停止+表示リセット ================= */
+function stopMotionForEdit(){
+  if(auto.on){
+    auto.on=false;
+    autoToggle.textContent='▶ 開始';
+    autoToggle.classList.remove('toggled');
+  }
+  autoOff={x:0,y:0};autoPrev1={x:0,y:0};autoPrev2={x:0,y:0};
+  if(anim.on){
+    anim.on=false;
+    const pl=document.getElementById('poseLoop');
+    pl.textContent='▶ ループ再生';pl.classList.remove('toggled');
+  }
+  if(physPaused){
+    physPaused=false;
+    const pe=document.getElementById('poseEdit');
+    pe.textContent='❄ その場で静止'; pe.classList.remove('toggled');
+  }
+  gBase={x:0,y:1};
+  // 表示(ズーム・位置)は維持する。狙った箇所を拡大して編集できるように。
+}
+
+/* ================= ポーズ編集(物理停止+ボーン直接配置) ================= */
+function zeroAllVel(){
+  layers.forEach(L=>{
+    L.allParts.concat(L.boneBodies).forEach(b=>{
+      Body.setVelocity(b,{x:0,y:0});
+      Body.setAngularVelocity(b,0);
+    });
+  });
+}
+function startPoseDrag(w){
+  let best=null,bd=Infinity;
+  layers.forEach(L=>L.boneNodes.forEach(n=>{
+    if(n.body.isStatic)return;
+    const d=Math.hypot(n.body.position.x-w.x,n.body.position.y-w.y);
+    if(d<bd){bd=d;best=n.body;}
+  }));
+  if(best&&bd<70/view.s) poseDrag={body:best};
+}
+const poseEditBtn=document.getElementById('poseEdit');
+poseEditBtn.addEventListener('click',()=>{
+  // 物理を止めず「一時停止して保持」: 速度ゼロで固める/解除のトグル
+  physPaused=!physPaused;
+  zeroAllVel();
+  poseEditBtn.textContent=physPaused?'❄ 静止解除':'❄ その場で静止';
+  poseEditBtn.classList.toggle('toggled',physPaused);
+  setStatus(physPaused
+    ?'現在の形をその場で静止させました。🅰/🅱で記録できます(🤏引っ張るで微調整も可)。'
+    :'静止を解除しました。');
+});
+
+/* ================= 骨格モデル参照(名前付き作用点) ================= */
+// uv座標(0-1)と接続。pinは接地点
+const BONE_MODELS={
+  human:{
+    points:{head:[.5,.08],neck:[.5,.20],chest:[.5,.34],belly:[.5,.46],hip:[.5,.56],
+      lsh:[.36,.24],lel:[.27,.40],lwr:[.22,.55], rsh:[.64,.24],rel:[.73,.40],rwr:[.78,.55],
+      lhip:[.42,.58],lkn:[.40,.76],lank:[.39,.95], rhip:[.58,.58],rkn:[.60,.76],rank:[.61,.95]},
+    bones:[['head','neck'],['neck','chest'],['chest','belly'],['belly','hip'],
+      ['neck','lsh'],['lsh','lel'],['lel','lwr'],['neck','rsh'],['rsh','rel'],['rel','rwr'],
+      ['hip','lhip'],['lhip','lkn'],['lkn','lank'],['hip','rhip'],['rhip','rkn'],['rkn','rank']],
+    pins:['lank','rank'],
+    labels:{head:'頭',neck:'首',chest:'胸',belly:'腹',hip:'腰',lsh:'左肩',lel:'左肘',lwr:'左手',rsh:'右肩',rel:'右肘',rwr:'右手',lhip:'左股',lkn:'左膝',lank:'左足首',rhip:'右股',rkn:'右膝',rank:'右足首'}
+  },
+  quad:{
+    points:{head:[.12,.30],neck:[.26,.34],shoulder:[.40,.40],spine:[.58,.40],hip:[.78,.40],tail:[.95,.30],
+      flu:[.40,.40],flk:[.38,.64],fla:[.37,.96], fru:[.46,.40],frk:[.46,.64],fra:[.46,.96],
+      blu:[.74,.40],blk:[.74,.64],bla:[.74,.96], bru:[.82,.40],brk:[.82,.64],bra:[.82,.96]},
+    bones:[['head','neck'],['neck','shoulder'],['shoulder','spine'],['spine','hip'],['hip','tail'],
+      ['flu','flk'],['flk','fla'],['fru','frk'],['frk','fra'],
+      ['blu','blk'],['blk','bla'],['bru','brk'],['brk','bra']],
+    pins:['fla','fra','bla','bra'],
+    labels:{head:'頭',neck:'首',shoulder:'肩',spine:'背',hip:'腰',tail:'尾',flu:'前左上',flk:'前左膝',fla:'前左足',fru:'前右上',frk:'前右膝',fra:'前右足',blu:'後左上',blk:'後左膝',bla:'後左足',bru:'後右上',brk:'後右膝',bra:'後右足'}
+  },
+  stick:{
+    points:{top:[.5,.06],mid:[.5,.5],bot:[.5,.94]},
+    bones:[['top','mid'],['mid','bot']],
+    pins:['bot'],
+    labels:{top:'上端',mid:'中央',bot:'下端(接地)'}
+  },
+  bird:{
+    points:{head:[.5,.12],body:[.5,.45],tail:[.5,.82],lwt:[.18,.40],rwt:[.82,.40],lft:[.44,.95],rft:[.56,.95]},
+    bones:[['head','body'],['body','tail'],['body','lwt'],['body','rwt'],['body','lft'],['body','rft']],
+    pins:['lft','rft'],
+    labels:{head:'頭',body:'胴',tail:'尾',lwt:'左翼',rwt:'右翼',lft:'左脚',rft:'右脚'}
+  },
+};
+let curModel='human';
+const modelWin=document.getElementById('modelWin');
+const modelCanvas=document.getElementById('modelCanvas');
+const mcx=modelCanvas.getContext('2d');
+
+document.getElementById('boneModel').addEventListener('click',()=>{
+  modelWin.style.display = modelWin.style.display==='none'?'block':'none';
+  if(modelWin.style.display==='block'){ modelPlaced={}; modelPlace=null; drawModel(); }
+});
+document.getElementById('modelClose').addEventListener('click',()=>{ modelWin.style.display='none'; modelPlace=null; });
+document.getElementById('modelSel').addEventListener('change',e=>{ curModel=e.target.value; modelPlaced={}; modelPlace=null; updModelName(); drawModel(); });
+document.getElementById('modelReset').addEventListener('click',()=>{ modelPlaced={}; modelPlace=null; updModelName(); drawModel(); });
+
+function updModelName(){
+  const m=BONE_MODELS[curModel];
+  document.getElementById('modelSelName').textContent='選択中: '+(modelPlace?m.labels[modelPlace.key]:'なし');
+}
+function drawModel(){
+  const m=BONE_MODELS[curModel];
+  const W=modelCanvas.width,H=modelCanvas.height,pad=18;
+  mcx.clearRect(0,0,W,H);
+  const X=u=>pad+u*(W-pad*2), Y=v=>pad+v*(H-pad*2);
+  mcx.strokeStyle='#3A4768';mcx.lineWidth=2;
+  m.bones.forEach(b=>{
+    const a=m.points[b[0]],c=m.points[b[1]];
+    mcx.beginPath();mcx.moveTo(X(a[0]),Y(a[1]));mcx.lineTo(X(c[0]),Y(c[1]));mcx.stroke();
+  });
+  Object.keys(m.points).forEach(k=>{
+    const p=m.points[k];
+    const placed=modelPlaced[k];
+    const sel=modelPlace&&modelPlace.key===k;
+    const pin=m.pins.includes(k);
+    mcx.fillStyle=sel?'#FFB454':placed?'#6EE7D8':(pin?'#FF5577':'#8B94B0');
+    mcx.beginPath();mcx.arc(X(p[0]),Y(p[1]),sel?6:4,0,7);mcx.fill();
+  });
+}
+modelCanvas.addEventListener('pointerdown',e=>{
+  const m=BONE_MODELS[curModel];
+  const r=modelCanvas.getBoundingClientRect();
+  const W=modelCanvas.width,H=modelCanvas.height,pad=18;
+  const ux=((e.clientX-r.left)/r.width*W-pad)/(W-pad*2);
+  const uy=((e.clientY-r.top)/r.height*H-pad)/(H-pad*2);
+  let best=null,bd=Infinity;
+  Object.keys(m.points).forEach(k=>{
+    const p=m.points[k];
+    const d=Math.hypot(p[0]-ux,p[1]-uy);
+    if(d<bd){bd=d;best=k;}
+  });
+  if(best&&bd<0.10){
+    modelPlace={model:curModel,key:best};
+    updModelName();
+    setStatus('「'+m.labels[best]+'」を選択。画像上の対応する位置をクリックして配置してください。');
+    drawModel();
+  }
+});
+
+// 画像上クリックで作用点を配置。隣接点が既に置かれていれば骨を生成
+function placeModelPoint(ip){
+  const m=BONE_MODELS[modelPlace.model];
+  const key=modelPlace.key;
+  let def=defAt(ip);
+  if(!def){ setStatus('対象レイヤーの枠内に配置してください。',true); return; }
+  if(!def._modelTarget) def._modelTarget=def;
+  modelPlaced[key]={x:ip.x,y:ip.y,def};
+  // この点に接続する骨で、相手も配置済みなら骨を追加
+  pushUndo('bones');
+  def.bones=normBones(def.bones);
+  m.bones.forEach(b=>{
+    let other=null;
+    if(b[0]===key) other=b[1];
+    if(b[1]===key) other=b[0];
+    if(other&&modelPlaced[other]&&modelPlaced[other].def===def){
+      const p1=modelPlaced[key], p2=modelPlaced[other];
+      const exists=def.bones.some(sg=>
+        (Math.hypot(sg.a.x-p1.x,sg.a.y-p1.y)<2&&Math.hypot(sg.b.x-p2.x,sg.b.y-p2.y)<2)||
+        (Math.hypot(sg.a.x-p2.x,sg.a.y-p2.y)<2&&Math.hypot(sg.b.x-p1.x,sg.b.y-p1.y)<2));
+      if(!exists) def.bones.push({a:{x:p1.x,y:p1.y},b:{x:p2.x,y:p2.y},pinned:false});
+    }
+  });
+  // 接地点なら固定
+  if(m.pins.includes(key)){
+    def.pins=def.pins||[];
+    if(!def.pins.some(q=>Math.hypot(q.x-ip.x,q.y-ip.y)<8)) def.pins.push({x:ip.x,y:ip.y});
+  }
+  buildAll();
+  drawModel();
+  const remain=Object.keys(m.points).filter(k=>!modelPlaced[k]);
+  modelPlace=null; updModelName();
+  setStatus('「'+m.labels[key]+'」を配置(骨は自動連結)。'+(remain.length?'残り'+remain.length+'点。次の点をモデルから選択。':'全点配置完了!'));
+}
+
+/* ================= 背景: 簡易人物除去 / カスタム画像 ================= */
+/* ================= 背景: 簡易人物除去 / カスタム画像 ================= */
+function ensureBgClean(){
+  if(!bgCleanDirty&&bgClean) return;
+  bgCleanDirty=false;
+  if(!maskCanvas){bgClean=null;return;}
+  const c=document.createElement('canvas');c.width=editW;c.height=editH;
+  const cc=c.getContext('2d');
+  cc.drawImage(srcImg,0,0,editW,editH);
+  for(let pass=0;pass<3;pass++){
+    const patch=document.createElement('canvas');patch.width=editW;patch.height=editH;
+    const pc=patch.getContext('2d');
+    pc.filter='blur('+(18+pass*14)+'px)';
+    pc.drawImage(c,0,0);
+    pc.filter='none';
+    pc.globalCompositeOperation='destination-in';
+    pc.filter='blur(6px)';
+    pc.drawImage(maskCanvas,0,0,editW,editH);
+    pc.filter='none';
+    cc.drawImage(patch,0,0);
+  }
+  bgClean=c;
+}
+document.getElementById('bgImgInput').addEventListener('change',e=>{
+  const file=e.target.files[0];
+  if(!file)return;
+  const url=URL.createObjectURL(file);
+  const img=new Image();
+  img.onload=()=>{
+    bgImage=img;
+    bgMode='custom';
+    document.getElementById('bgMode').value='custom';
+    URL.revokeObjectURL(url);
+    setStatus('背景をカスタム画像に置き換えました。');
+  };
+  img.src=url;
+});
+
+/* ================= 保存/読込 ================= */
+document.getElementById('saveBtn').addEventListener('click',()=>{
+  if(!srcImg)return;
+  const s=Math.min(1600/Math.max(imgW,imgH),1);
+  const ic=document.createElement('canvas');
+  ic.width=Math.round(imgW*s);ic.height=Math.round(imgH*s);
+  ic.getContext('2d').drawImage(srcImg,0,0,ic.width,ic.height);
+  const proj={
+    app:'yurashi-photo',version:4,
+    image:ic.toDataURL('image/jpeg',.9),
+    mask:maskCanvas?maskCanvas.toDataURL('image/png'):null,
+    marks:markCv.map(cv=>cv?cv.toDataURL('image/png'):null),
+    markInfo,meshDensity,bgMode,bgColor,
+    auto:{pattern:auto.pattern,dist:auto.dist,period:auto.period},
+    autoZoom:{on:autoZoom.on,amt:autoZoom.amt,period:autoZoom.period},
+    pullLoops:pullLoops.map(pl=>({axImg:pl.axImg,ayImg:pl.ayImg,bxImg:pl.bxImg,byImg:pl.byImg,phase:pl.phase})),
+    pullLoopPeriod,
+    defs:defs.map(d=>({label:d.label,category:d.category,bboxPct:d.bboxPct,
+      params:d.params,useMask:d.useMask,
+      pins:(d.pins||[]).map(p=>({x:p.x*s,y:p.y*s})),
+      spheres:(d.spheres||[]).map(sp=>({cx:sp.cx*s,cy:sp.cy*s,
+        rx:(sp.rx||40)*s, ry:(sp.ry||40)*s, rot:sp.rot||0, soft:sp.soft??0.5})),
+      bones:normBones(d.bones).map(sg=>({a:{x:sg.a.x*s,y:sg.a.y*s},b:{x:sg.b.x*s,y:sg.b.y*s},pinned:!!sg.pinned}))})),
+  };
+  const blob=new Blob([JSON.stringify(proj)],{type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='yurashi-project-'+new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')+'.json';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  setStatus('プロジェクト(画像+設定一式)を保存しました。');
+});
+document.getElementById('projInput').addEventListener('change',e=>{
+  const file=e.target.files[0];
+  if(!file)return;
+  const fr=new FileReader();
+  fr.onload=()=>{
+    try{
+      const proj=JSON.parse(fr.result);
+      if(proj.app!=='yurashi-photo')throw new Error('このアプリのプロジェクトではありません');
+      const img=new Image();
+      img.onload=()=>{
+        initImage(img);
+        const loadCv=(durl,cb)=>{
+          if(!durl){cb(null);return;}
+          const m=new Image();
+          m.onload=()=>{
+            const c=document.createElement('canvas');
+            c.width=editW;c.height=editH;
+            c.getContext('2d').drawImage(m,0,0,editW,editH);
+            cb(c);
+          };
+          m.src=durl;
+        };
+        loadCv(proj.mask,mc=>{
+          maskCanvas=mc;refreshTintedMask();
+          let done=0;
+          const marks=proj.marks||[null,null,null];
+          marks.forEach((du,i)=>loadCv(du,c=>{
+            if(c)markCv[i]=c;
+            if(++done===3){
+              refreshMarkCache();
+              markInfo=(proj.markInfo||markInfo).map(mi=>Object.assign({swayMult:1},mi));
+              meshDensity=proj.meshDensity||1;
+              bgMode=proj.bgMode||'dark';bgColor=proj.bgColor||'#0E1220';
+              document.getElementById('bgMode').value=bgMode;
+              document.getElementById('bgColor').value=bgColor;
+              document.getElementById('densitySlider').value=Math.round(meshDensity*100);
+              document.getElementById('densityOut').textContent=meshDensity.toFixed(1)+'×';
+              if(proj.auto){
+                auto.pattern=proj.auto.pattern;
+                auto.dist=proj.auto.dist||60;
+                auto.period=proj.auto.period||1.4;
+                document.getElementById('autoPattern').value=auto.pattern;
+                document.getElementById('autoDistOut').textContent=auto.dist+'px';
+                document.getElementById('autoPeriod').value=Math.round(auto.period*10);
+                document.getElementById('autoPeriodOut').textContent=auto.period.toFixed(1)+'秒';
+              }
+              defs=proj.defs.map(d=>({label:d.label,category:d.category,bboxPct:d.bboxPct,
+                params:Object.assign({anchored:true,jointStiff:.35,depthSway:.3},d.params),
+                bones:normBones(d.bones),pins:d.pins||[],spheres:d.spheres||[],useMask:!!d.useMask}));
+              buildMarkCard();
+              clearPullLoopCons();
+              pullLoops=(proj.pullLoops||[]).map(p=>({axImg:p.axImg,ayImg:p.ayImg,bxImg:p.bxImg,byImg:p.byImg,phase:p.phase||0,con:null}));
+              if(proj.pullLoopPeriod){
+                pullLoopPeriod=proj.pullLoopPeriod;
+                document.getElementById('pullLoopPeriod').value=Math.round(pullLoopPeriod*10);
+                document.getElementById('pullLoopPeriodOut').textContent=pullLoopPeriod.toFixed(1)+'秒';
+              }
+              buildAll();
+              setStatus('プロジェクトを読み込みました('+defs.length+'レイヤー)。');
+            }
+          }));
+        });
+      };
+      img.src=proj.image;
+    }catch(err){
+      setStatus('読み込み失敗: '+err.message,true);
+    }
+  };
+  fr.readAsText(file);
+  e.target.value='';
+});
+</script>
+</body>
+</html>
