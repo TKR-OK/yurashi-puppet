@@ -167,6 +167,7 @@
       ブラシ<input type="range" id="markBrush" min="10" max="160" value="50">
       濃さ<input type="range" id="markOpacity" min="5" max="100" value="35"><output id="markOpacityOut" class="mini">0.35</output>
       <span class="mini">重ね塗りで濃く</span>
+      <button id="heightView" title="塗った濃さを山型の高さで確認(ドラッグで回転)">⛰️ 高さ確認</button><button id="heightReset" title="視点を正面に戻す">⟲ 正面</button>
     </div>
     <div class="subbar" id="sub-bone">
       <button id="boneMove" class="toggled">✋ 点を動かす</button><button id="boneAdd">➕ 骨を足す</button><button id="boneSphere">⚫ 楕円を置く</button><button id="boneDel">🗑 削除</button><button id="bonePin">📌 固定</button>
@@ -325,6 +326,9 @@ let defs=[], layers=[];
 let engine=null, worldReady=false, running=false;
 let gBase={x:0,y:1}, gPrev={x:0,y:1};
 let lastSensorAccel={x:0,y:0}; // インジケータ表示用: 直近のセンサー揺れ方向(減衰)
+// 高さプレビュー(マーキング濃度→山型の盛り上がりを擬似3Dで確認)
+let heightView={on:false, rotX:0, rotY:0, amp:60}; // rotX/Y=視点角(ラジアン), amp=盛り上がりの強さ(px)
+let heightDrag=null;
 let sensorOn=false;
 let model=null, segmenter=null, poseDetector=null, posesCache=[];
 let meshDensity=1.0;
@@ -662,11 +666,15 @@ function vertexMultOf(def,imgPt,refDist){
     swayF*=1+(markInfo[2].swayMult-1)*aC;
     swayDir = 1 - 2*aC; // a=0→+1, a=0.5→0, a=1→-1(完全逆転)
   }
+  // 【最小構成】高さ(height): 塗った濃さの合計を「山の盛り上がり」とみなす。
+  // 高い頂点ほど後段で揺れが増幅され、重力で山頂が一番動く挙動になる。
+  const height=Math.min(1, aA*0.7 + aB*1.0 + aC*0.7); // Bを主役に、A/Cも盛り上がりに寄与
   return {
     m:Math.min(Math.max(m,.08),5),
     massF:Math.min(Math.max(massF,.12),5),
     swayF:Math.min(Math.max(swayF,.2),8),
     swayDir,
+    height,
   };
 }
 
@@ -734,9 +742,9 @@ function buildLayer(def){
   const footStatic = params.anchored;
 
   const refDist=Math.max(iw,ihh)*0.16;
-  const parts=[],homes=[],mults=[],massFs=[],swayFs=[];
+  const parts=[],homes=[],mults=[],massFs=[],swayFs=[],heights=[];
   for(let r=0;r<=rows;r++){
-    parts.push([]);homes.push([]);mults.push([]);massFs.push([]);swayFs.push([]);
+    parts.push([]);homes.push([]);mults.push([]);massFs.push([]);swayFs.push([]);heights.push([]);
     for(let c=0;c<=cols;c++){
       const px=x0+c*cw, py=y0+r*ch;
       const imgPt={x:ix+(c/cols)*iw, y:iy+(r/rows)*ihh};
@@ -745,7 +753,7 @@ function buildLayer(def){
       const covHere=trimOn ? coverage(r,c) : 1;
       if(trimOn && covHere < 0.08){
         // null を格納してバネ生成時にスキップ
-        parts[r].push(null);homes[r].push(null);mults[r].push(1);massFs[r].push(1);swayFs[r].push(1);
+        parts[r].push(null);homes[r].push(null);mults[r].push(1);massFs[r].push(1);swayFs[r].push(1);heights[r].push(0);
         continue;
       }
       const isFoot=(r===rows)&&footStatic;
@@ -757,11 +765,12 @@ function buildLayer(def){
       b._sway=vm.swayF;
       b._swayDir=vm.swayDir||1;
       b._foot=(r===rows);
+      b._height=vm.height||0; // 山の高さ(揺れ増幅・立体描画に使う)
       if(!isFoot){
         const mNorm=(vm.m-0.55)/1.05;
         Body.setMass(b,Math.max(.05,pmBase*(0.6+0.8*Math.min(mNorm,2))*vm.massF));
       }
-      parts[r].push(b);homes[r].push({x:px,y:py});mults[r].push(vm.m);massFs[r].push(vm.massF);swayFs[r].push(vm.swayF);
+      parts[r].push(b);homes[r].push({x:px,y:py});mults[r].push(vm.m);massFs[r].push(vm.massF);swayFs[r].push(vm.swayF);heights[r].push(vm.height||0);
     }
   }
 
@@ -897,7 +906,7 @@ function buildLayer(def){
 
   const L={
     def,label:def.label,category:def.category,
-    img:lc,cols,rows,parts,homes,mults,massFs,swayFs,allParts,gridCons,homeCons,params,pmBase,cellVis,
+    img:lc,cols,rows,parts,homes,mults,massFs,swayFs,heights,allParts,gridCons,homeCons,params,pmBase,cellVis,
     boneNodes,boneSegsB,boneCons,bendCons,skinCons,boneBodies,hasPinnedBone,
     sphereObjs,
     color:COLORS[layers.length%COLORS.length],
@@ -910,12 +919,15 @@ function buildLayer(def){
 function updatePhysicsMaps(){
   layers.forEach(L=>{
     for(let r=0;r<=L.rows;r++)for(let c=0;c<=L.cols;c++){
+      const b=L.parts[r][c];
+      if(!b) continue; // マスク外(null)はスキップ
       const imgPt={x:L.bboxImg.ix+(c/L.cols)*L.bboxImg.iw,y:L.bboxImg.iy+(r/L.rows)*L.bboxImg.ihh};
       const vm=vertexMultOf(L.def,imgPt,L.refDist);
       L.mults[r][c]=vm.m;L.massFs[r][c]=vm.massF;L.swayFs[r][c]=vm.swayF;
-      const b=L.parts[r][c];
+      if(L.heights) L.heights[r][c]=vm.height||0;
       b._sway=vm.swayF;
       b._swayDir=vm.swayDir||1;
+      b._height=vm.height||0;
       b.frictionAir=Math.min(.09,Math.max(.015,0.06/Math.sqrt(vm.swayF)));
       if(!b.isStatic){
         const mNorm=(vm.m-0.55)/1.05;
@@ -966,7 +978,7 @@ function applyInertia(accX,accY){
   lastInertia.y=Math.max(-3,Math.min(3,lastInertia.y));
   layers.forEach(L=>{
     L.allParts.concat(L.boneBodies).forEach(b=>{
-      if(!b.isStatic){ const sd=(b._swayDir||1); Body.applyForce(b,b.position,{x:-ax*INERTIA_K*b.mass*(b._sway||1)*sd,y:-ay*INERTIA_K*b.mass*(b._sway||1)*sd}); }
+      if(!b.isStatic){ const sd=(b._swayDir||1); const hb=1+(b._height||0)*2.5; Body.applyForce(b,b.position,{x:-ax*INERTIA_K*b.mass*(b._sway||1)*sd*hb,y:-ay*INERTIA_K*b.mass*(b._sway||1)*sd*hb}); }
     });
   });
 }
@@ -1173,6 +1185,21 @@ document.getElementById('markSel').addEventListener('change',e=>markSel=+e.targe
 document.getElementById('markOpacity').addEventListener('input',e=>{
   document.getElementById('markOpacityOut').textContent=(e.target.value/100).toFixed(2);
 });
+const heightViewBtn=document.getElementById('heightView');
+heightViewBtn.addEventListener('click',()=>{
+  heightView.on=!heightView.on;
+  heightViewBtn.classList.toggle('toggled',heightView.on);
+  if(heightView.on && heightView.rotX===0 && heightView.rotY===0){
+    heightView.rotX=-0.5; heightView.rotY=0.5; // 初期は斜め上から見て盛り上がりを分かりやすく
+  }
+  setStatus(heightView.on
+    ? '高さ確認モード: 画面をドラッグすると視点が回り、塗った部分の盛り上がりを横から見られます。「⟲ 正面」で戻ります。'
+    : '高さ確認モードを終了しました。');
+});
+document.getElementById('heightReset').addEventListener('click',()=>{
+  heightView.rotX=0; heightView.rotY=0;
+  setStatus('視点を正面に戻しました。');
+});
 document.getElementById('zoomReset').addEventListener('click',fitView);
 const plDelBtn=document.getElementById('pullLoopDelMode');
 plDelBtn.addEventListener('click',()=>{
@@ -1249,6 +1276,11 @@ function onDown(e){
   }
   const w=worldOf(e);
   hoverPt=w;
+  // 高さ確認モード: ドラッグで視点を回す(通常のツール操作はしない)
+  if(heightView.on){
+    heightDrag={x:e.clientX,y:e.clientY,rotX:heightView.rotX,rotY:heightView.rotY};
+    return;
+  }
   if(physPaused){
     // 静止中は引っ張りで形を作る(メッシュごと動くので貫通しない)
     if(!startPull(w)) startPoseDrag(w);
@@ -1306,6 +1338,12 @@ function onMove(e){
     clampView();
     return;
   }
+  // 高さ確認モードの視点回転
+  if(heightDrag){
+    heightView.rotY=heightDrag.rotY+(e.clientX-heightDrag.x)*0.01;
+    heightView.rotX=Math.max(-1.3,Math.min(1.3,heightDrag.rotX-(e.clientY-heightDrag.y)*0.01));
+    return;
+  }
   if(pull){ pull.con.pointA=w; return; }
   if(pullLoopDraw){ pullLoopDraw.bx=w.x; pullLoopDraw.by=w.y; return; }
   if(poseDrag){
@@ -1336,6 +1374,7 @@ function onMove(e){
 function onUp(e){
   activePtrs.delete(e.pointerId);
   if(activePtrs.size<2)pinch=null;
+  if(heightDrag){ heightDrag=null; return; }
   if(pull){Composite.remove(engine.world,pull.con);pull=null;}
   poseDrag=null;
   if(sphereDraw){
@@ -1379,6 +1418,7 @@ function cancelOps(){
   poseDrag=null;
   boneDrag=null;
   pullLoopDraw=null;
+  heightDrag=null;
   sphereDraw=null;
   sphereDrag=null;
   if(pull){Composite.remove(engine.world,pull.con);pull=null;}
@@ -1858,7 +1898,7 @@ function impulse(k=1){
       const wgt=1-r/L.rows;
       for(let c=0;c<=L.cols;c++){
         const b=L.parts[r][c];
-        if(!b.isStatic){ const sd=(b._swayDir||1); Body.applyForce(b,b.position,{x:fx*b.mass*wgt*8*(b._sway||1)*sd,y:fy*b.mass*wgt*8*(b._sway||1)*sd}); }
+        if(!b.isStatic){ const sd=(b._swayDir||1); const hb=1+(b._height||0)*2.5; Body.applyForce(b,b.position,{x:fx*b.mass*wgt*8*(b._sway||1)*sd*hb,y:fy*b.mass*wgt*8*(b._sway||1)*sd*hb}); }
       }
     }
   });
@@ -1986,10 +2026,36 @@ function loop(t){
 
   layers.forEach(L=>{
     const iu=L.img.width/L.cols,iv=L.img.height/L.rows;
+    // 高さプレビュー用: レイヤー中心(回転の軸)
+    let hvCx=0,hvCy=0,hvN=0;
+    if(heightView.on){
+      for(let r=0;r<=L.rows;r++)for(let c=0;c<=L.cols;c++){
+        const b=L.parts[r][c]; if(!b)continue;
+        hvCx+=b.position.x; hvCy+=b.position.y; hvN++;
+      }
+      if(hvN){ hvCx/=hvN; hvCy/=hvN; }
+    }
+    // 頂点を投影(高さプレビューONなら山型に持ち上げて回転)
+    const proj=(b,r,c)=>{
+      if(!heightView.on) return b.position;
+      const h=(L.heights&&L.heights[r]&&L.heights[r][c])||0;
+      const z=h*heightView.amp; // 高さ(手前=+Z)
+      let x=b.position.x-hvCx, y=b.position.y-hvCy, zz=z;
+      // Y軸回転(左右にグリグリ)
+      const cy=Math.cos(heightView.rotY), sy=Math.sin(heightView.rotY);
+      let x1=x*cy+zz*sy, z1=-x*sy+zz*cy;
+      // X軸回転(上下に倒す)
+      const cx=Math.cos(heightView.rotX), sx=Math.sin(heightView.rotX);
+      let y1=y*cx-z1*sx, z2=y*sx+z1*cx;
+      // 正射影 + 手前ほどわずかに拡大(立体感)
+      const sc=1+z2*0.0008;
+      return {x:hvCx+x1*sc, y:hvCy+y1*sc};
+    };
     for(let r=0;r<L.rows;r++)for(let c=0;c<L.cols;c++){
       if(L.cellVis&&!L.cellVis[r][c]) continue;
-      const p00=L.parts[r][c].position,p10=L.parts[r][c+1].position;
-      const p01=L.parts[r+1][c].position,p11=L.parts[r+1][c+1].position;
+      if(!L.parts[r][c]||!L.parts[r][c+1]||!L.parts[r+1][c]||!L.parts[r+1][c+1]) continue;
+      const p00=proj(L.parts[r][c],r,c),p10=proj(L.parts[r][c+1],r,c+1);
+      const p01=proj(L.parts[r+1][c],r+1,c),p11=proj(L.parts[r+1][c+1],r+1,c+1);
       const u0=c*iu,v0=r*iv,u1=(c+1)*iu,v1=(r+1)*iv;
       drawTexTri(L.img,u0,v0,u1,v0,u1,v1,p00.x,p00.y,p10.x,p10.y,p11.x,p11.y);
       drawTexTri(L.img,u0,v0,u1,v1,u0,v1,p00.x,p00.y,p11.x,p11.y,p01.x,p01.y);
