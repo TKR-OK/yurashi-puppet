@@ -1095,7 +1095,7 @@ function onTiltOrientation(e){
   if(!tiltZeroOn || e.beta===null) return;
   if(!tiltZeroBase){ tiltZeroBase={beta:e.beta,gamma:e.gamma}; return; }
   const dBeta=(e.beta-tiltZeroBase.beta)*Math.PI/180;   // 前後の傾き差分→rotX
-  const dGamma=(e.gamma-tiltZeroBase.gamma)*Math.PI/180; // 左右の傾き差分→rotY
+  const dGamma=(e.gamma-tiltZeroBase.gamma)*Math.PI/180*0.5; // 左右の傾き差分→rotY(裏返り防止で感度半分)
   heightView.on=true;
   heightView.rotX=Math.max(-1.3,Math.min(1.3, dBeta));
   heightView.rotY=Math.max(-1.3,Math.min(1.3, dGamma));
@@ -1160,6 +1160,10 @@ document.querySelectorAll('button.tool').forEach(btn=>{
     }
     if(tool==='bone' && typeof setBoneMode==='function') setBoneMode('move');
     if(tool==='mask'||tool==='mark') stopMotionForEdit();
+    if(tool==='mask'){
+      const tm=document.getElementById('trimMesh');
+      if(!tm.checked){ tm.checked=true; if(defs.length) buildAll(); }
+    }
     // ボーンツール選択時は楕円設定カードを自動で開く(配置と設定が近くにある状態に)
     if(tool==='bone'){ const sc=document.getElementById('sphereCard'); if(sc) sc.classList.remove('collapsed'); }
     hideChooser();
@@ -1712,8 +1716,7 @@ function ensureMaskCv(){
   if(!maskCanvas){
     maskCanvas=document.createElement('canvas');
     maskCanvas.width=editW;maskCanvas.height=editH;
-    const mc=maskCanvas.getContext('2d');
-    mc.fillStyle='#fff';mc.fillRect(0,0,editW,editH);
+    // 透明(無地)で初期化。塗った場所だけがマスク対象になる(全面マスクで始まるのが「枠追加で自動マスクされる」バグの真因だった)
     refreshTintedMask();
     // マスクは全レイヤー共有の1枚。person以外(手動枠のobject等)も含め全レイヤーで使えるようにする
     defs.forEach(d=>{d.useMask=true;});
