@@ -24,6 +24,7 @@
   #gravityNeedle{position:fixed; right:12px; bottom:12px; width:50px; height:50px; border-radius:50%; background:rgba(14,18,32,.7); border:1px solid var(--line); display:none; z-index:8;}
   #modeBtn{position:fixed; right:14px; top:14px; z-index:40; font-size:22px; width:52px; height:52px; padding:0; border-radius:14px; display:flex; align-items:center; justify-content:center; box-shadow:0 4px 16px rgba(0,0,0,.4);}
   #viewBtn{position:fixed; right:74px; top:14px; z-index:40; font-size:14px; height:52px; padding:0 14px; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,.4);}
+  #undoBtn{position:fixed; right:178px; top:14px; z-index:40; font-size:14px; height:52px; padding:0 14px; border-radius:14px; box-shadow:0 4px 16px rgba(0,0,0,.4);}
   #viewBtn.viewing{background:var(--mint); color:#0E1220;}
   #modeBtn.closed{opacity:.45; background:var(--panel-2);}
   #modeBtn.closed:hover, #modeBtn.closed:active{opacity:1;}
@@ -83,7 +84,7 @@
   <div>左のパネルから画像をアップロード → AI検出 → 編集<br>すべて端末内で処理され、画像は外部送信されません</div>
 </div>
 <canvas id="gravityNeedle" width="50" height="50" title="本体の揺れ方向(センサー接続時)"></canvas>
-<button id="viewBtn">👁 閲覧</button><button id="modeBtn" title="ツールパネルを閉じる">✕</button>
+<button id="undoBtn" disabled>↩ 戻す</button><button id="viewBtn">👁 閲覧</button><button id="modeBtn" title="ツールパネルを閉じる">✕</button>
 <div id="toast"></div>
 
 <div id="modelWin" style="position:fixed; display:none; right:12px; top:60px; width:240px; background:var(--panel); border:1px solid var(--mint); border-radius:14px; padding:12px; z-index:26; box-shadow:0 8px 30px rgba(0,0,0,.5);">
@@ -121,7 +122,6 @@
       <label class="btn primary" for="fileInput">🖼 画像</label>
       <input type="file" id="fileInput" accept="image/*">
       <button id="analyzeBtn" disabled>🤖 AI検出</button>
-      <button id="undoBtn" disabled>↩ 戻す</button>
       <button id="resetBtn" disabled>↺ リセット</button>
       <button id="saveBtn" disabled>💾 保存</button>
       <label class="btn" for="projInput">📂 読込</label>
@@ -143,7 +143,9 @@
       <button class="tool" data-tool="bone">🦴 ボーン</button>
       <button class="tool" data-tool="addbox">➕ 枠追加</button>
     </div>
-    <div class="subbar show" id="sub-grab">ドラッグ=画像移動(加速度で中身が揺れる) / ピンチ・ホイール=拡縮 <button id="zoomReset">表示リセット</button></div>
+    <div class="subbar show" id="sub-grab">ドラッグ=画像移動(加速度で中身が揺れる) / ピンチ・ホイール=拡縮 <button id="zoomReset">表示リセット</button>
+      <button id="axisView" title="メッシュの高さを擬似3Dで確認(ドラッグで回転)">🔄 軸回転</button><button id="axisReset" title="視点を正面に戻す">⟲ 正面</button>
+    </div>
     <div class="subbar" id="sub-pullloop">
       始点から終点へドラッグで矢印を作成→その往復を自動ループ。
       <button id="pullLoopDelMode">🗑 矢印削除</button><button id="pullLoopClear">全消去</button>
@@ -167,7 +169,8 @@
       ブラシ<input type="range" id="markBrush" min="10" max="160" value="50">
       濃さ<input type="range" id="markOpacity" min="5" max="100" value="35"><output id="markOpacityOut" class="mini">0.35</output>
       <span class="mini">重ね塗りで濃く</span>
-      <button id="heightView" title="塗った濃さを山型の高さで確認(ドラッグで回転)">⛰️ 高さ確認</button><button id="heightReset" title="視点を正面に戻す">⟲ 正面</button>
+      <button id="blurMarksBtn" title="台形をなだらかな山型にする(押すたびになめらかに)">〰️ ぼかし</button>
+      <div class="slider-line"><label>高さ全体</label><input type="range" id="heightBoost" min="-100" max="100" value="0"><span></span><output id="heightBoostOut">±0</output></div>
     </div>
     <div class="subbar" id="sub-bone">
       <button id="boneMove" class="toggled">✋ 点を動かす</button><button id="boneAdd">➕ 骨を足す</button><button id="boneSphere">⚫ 楕円を置く</button><button id="boneDel">🗑 削除</button><button id="bonePin">📌 固定</button>
@@ -206,7 +209,7 @@
       <span class="mini">色</span><input type="color" id="bgColor" value="#0E1220">
       <label class="btn" for="bgImgInput" style="font-size:11px;padding:5px 8px;">🖼 背景画像</label>
       <input type="file" id="bgImgInput" accept="image/*">
-      <span class="mini">密度</span><input type="range" id="densitySlider" min="50" max="200" value="100"><output id="densityOut" class="mini">1.0×</output>
+      <span class="mini">密度</span><input type="range" id="densitySlider" min="50" max="300" value="100"><output id="densityOut" class="mini">1.0×</output>
       <button id="expandBtn">⬆ 余白+10%</button>
       <label class="pill" style="cursor:pointer;"><input type="checkbox" id="trimMesh"> ✂️ マスク形状で切り抜く(輪郭の外を消す)</label>
     </div>
@@ -328,6 +331,8 @@ let gBase={x:0,y:1}, gPrev={x:0,y:1};
 let lastSensorAccel={x:0,y:0}; // インジケータ表示用: 直近のセンサー揺れ方向(減衰)
 // 高さプレビュー(マーキング濃度→山型の盛り上がりを擬似3Dで確認)
 let heightView={on:false, rotX:0, rotY:0, amp:60}; // rotX/Y=視点角(ラジアン), amp=盛り上がりの強さ(px)
+let heightBoost=0; // マーキング全体の高さの底上げ/底下げ(-1〜+1)。一部でなく全体に効く
+let poseRot={A:null,B:null}; // ポーズA/Bに紐づく軸回転角(擬似3Dアニメ用)
 let heightDrag=null;
 let sensorOn=false;
 let model=null, segmenter=null, poseDetector=null, posesCache=[];
@@ -572,6 +577,25 @@ function distToSeg(p,a,b){
 function refreshMarkCache(){
   markData=markCv.map(cv=>cv?cv.getContext('2d').getImageData(0,0,cv.width,cv.height).data:null);
 }
+// マーキングをぼかして、台形(べた塗りで濃度が頭打ちした形)を山型になだらかにする
+function blurMarks(px){
+  pushUndo('mark');
+  markCv.forEach((cv,i)=>{
+    if(!cv) return;
+    const w=cv.width,h=cv.height;
+    const tmp=document.createElement('canvas'); tmp.width=w; tmp.height=h;
+    const tctx=tmp.getContext('2d');
+    tctx.filter='blur('+px+'px)';
+    tctx.drawImage(cv,0,0);
+    const c2=cv.getContext('2d');
+    c2.clearRect(0,0,w,h);
+    c2.filter='none';
+    c2.drawImage(tmp,0,0);
+  });
+  refreshMarkCache();
+  updatePhysicsMaps();
+  setStatus('マーキングをぼかしました。もう一度押すとさらになだらかになります。');
+}
 function markAlpha(imgPt,i){
   if(!markData[i]) return 0;
   const ex=Math.min(editW-1,Math.max(0,Math.round(imgPt.x/imgW*editW)));
@@ -668,7 +692,9 @@ function vertexMultOf(def,imgPt,refDist){
   }
   // 【最小構成】高さ(height): 塗った濃さの合計を「山の盛り上がり」とみなす。
   // 高い頂点ほど後段で揺れが増幅され、重力で山頂が一番動く挙動になる。
-  const height=Math.min(1, aA*0.7 + aB*1.0 + aC*0.7); // Bを主役に、A/Cも盛り上がりに寄与
+  // heightBoostは「塗った部分全体」をスケールする(-1で実質0、0で等倍、+1で2倍)。塗っていない場所は常に0のまま。
+  const rawH=aA*0.7 + aB*1.0 + aC*0.7;
+  const height=Math.min(1, Math.max(0, rawH*(1+heightBoost)));
   return {
     m:Math.min(Math.max(m,.08),5),
     massF:Math.min(Math.max(massF,.12),5),
@@ -699,9 +725,9 @@ function buildLayer(def){
     lctx.globalCompositeOperation='source-over';
   }
 
-  let cols=Math.max(2,Math.min(9,Math.round(w/70*meshDensity)));
-  let rows=Math.max(3,Math.min(14,Math.round(h/55*meshDensity)));
-  while((cols+1)*(rows+1)>170){ if(rows>=cols)rows--; else cols--; }
+  let cols=Math.max(2,Math.min(20,Math.round(w/70*meshDensity)));
+  let rows=Math.max(3,Math.min(28,Math.round(h/55*meshDensity)));
+  while((cols+1)*(rows+1)>420){ if(rows>=cols)rows--; else cols--; }
   const cw=w/cols, ch=h/rows;
   const radius=Math.max(3,Math.min(cw,ch)*0.30);
 
@@ -1076,7 +1102,7 @@ document.querySelectorAll('button.tool').forEach(btn=>{
   btn.addEventListener('click',()=>{
     tool=btn.dataset.tool;
     document.querySelectorAll('button.tool').forEach(b=>b.classList.toggle('toggled',b===btn));
-    ['grab','pullloop','mask','mark','bone','addbox'].forEach(t=>{
+    ['pullloop','mask','mark','bone','addbox'].forEach(t=>{
       const el=document.getElementById('sub-'+t);
       if(el)el.classList.toggle('show',t===tool);
     });
@@ -1185,18 +1211,26 @@ document.getElementById('markSel').addEventListener('change',e=>markSel=+e.targe
 document.getElementById('markOpacity').addEventListener('input',e=>{
   document.getElementById('markOpacityOut').textContent=(e.target.value/100).toFixed(2);
 });
-const heightViewBtn=document.getElementById('heightView');
-heightViewBtn.addEventListener('click',()=>{
+document.getElementById('blurMarksBtn').addEventListener('click',()=>{ blurMarks(8); });
+document.getElementById('heightBoost').addEventListener('input',e=>{
+  heightBoost=e.target.value/100;
+  document.getElementById('heightBoostOut').textContent=(heightBoost>0?'+':'')+heightBoost.toFixed(2);
+});
+document.getElementById('heightBoost').addEventListener('change',()=>{
+  if(defs.length){ updatePhysicsMaps(); setStatus('マーキング全体の高さを '+(heightBoost>0?'+':'')+Math.round(heightBoost*100)+'% 調整しました。'); }
+});
+const axisViewBtn=document.getElementById('axisView');
+axisViewBtn.addEventListener('click',()=>{
   heightView.on=!heightView.on;
-  heightViewBtn.classList.toggle('toggled',heightView.on);
+  axisViewBtn.classList.toggle('toggled',heightView.on);
   if(heightView.on && heightView.rotX===0 && heightView.rotY===0){
     heightView.rotX=-0.5; heightView.rotY=0.5; // 初期は斜め上から見て盛り上がりを分かりやすく
   }
   setStatus(heightView.on
-    ? '高さ確認モード: 画面をドラッグすると視点が回り、塗った部分の盛り上がりを横から見られます。「⟲ 正面」で戻ります。'
-    : '高さ確認モードを終了しました。');
+    ? '軸回転モード: 画面をドラッグすると視点が回り、マーキングの盛り上がりを立体的に確認できます。「⟲ 正面」で戻ります。'
+    : '軸回転モードを終了しました。');
 });
-document.getElementById('heightReset').addEventListener('click',()=>{
+document.getElementById('axisReset').addEventListener('click',()=>{
   heightView.rotX=0; heightView.rotY=0;
   setStatus('視点を正面に戻しました。');
 });
@@ -1856,6 +1890,17 @@ function updateAuto(tSec,dtSec){
 
 /* ================= センサー ================= */
 document.getElementById('sensorBtn').addEventListener('click',async()=>{
+  if(sensorOn){
+    // OFF: イベント解除して停止
+    window.removeEventListener('devicemotion',onMotion);
+    sensorOn=false;
+    sensorVel={x:0,y:0}; lastSensorAccel={x:0,y:0};
+    const pill=document.getElementById('sensorPill');
+    pill.textContent='未接続'; pill.classList.remove('on');
+    document.getElementById('sensorBtn').textContent='📡 センサー';
+    setStatus('センサー連動を停止しました。');
+    return;
+  }
   try{
     if(typeof DeviceMotionEvent!=='undefined'&&typeof DeviceMotionEvent.requestPermission==='function'){
       const p=await DeviceMotionEvent.requestPermission();
@@ -1865,7 +1910,8 @@ document.getElementById('sensorBtn').addEventListener('click',async()=>{
     sensorOn=true;
     const pill=document.getElementById('sensorPill');
     pill.textContent='接続中';pill.classList.add('on');
-    setStatus('センサー連動を開始しました。本体を揺らすと、つかんで動かしたのと同じように柔らかく揺れます。');
+    document.getElementById('sensorBtn').textContent='📡 停止';
+    setStatus('センサー連動を開始しました。本体を揺らすと、つかんで動かしたのと同じように柔らかく揺れます。もう一度押すと停止します。');
   }catch(e){
     setStatus('この環境ではセンサーを使えません(https必須)。',true);
   }
@@ -2448,7 +2494,9 @@ function recordPose(slot){
     L['pose'+slot]=L.boneNodes.map(nd=>({x:nd.body.position.x,y:nd.body.position.y}));
     n++;
   });
-  setStatus(n?('ボーンの形をポーズ'+slot+'として記録しました。🤏引っ張るで作ってから記録するのがコツです。'):'ボーン付きレイヤーがありません。',!n);
+  // 軸回転(擬似3Dの視点)も一緒に記録。これでポーズ間を移動するときに回転も連動する
+  poseRot[slot]={rotX:heightView.rotX, rotY:heightView.rotY};
+  setStatus(n?('ボーンの形と軸回転をポーズ'+slot+'として記録しました。🔄軸回転で角度をつけてから記録すると、擬似3Dの動きになります。'):'ボーン付きレイヤーがありません。',!n);
 }
 function updatePoseAnim(tSec){
   if(!anim.on) return;
@@ -2466,6 +2514,12 @@ function updatePoseAnim(tSec){
         y:(ty-nd.body.position.y)*k*nd.body.mass});
     });
   });
+  // 軸回転もA↔Bで補間(記録されていれば)。これで再生中に視点がなめらかに動く=擬似3Dアニメ
+  if(poseRot.A && poseRot.B){
+    heightView.rotX=poseRot.A.rotX+(poseRot.B.rotX-poseRot.A.rotX)*ph;
+    heightView.rotY=poseRot.A.rotY+(poseRot.B.rotY-poseRot.A.rotY)*ph;
+    if(!heightView.on){ heightView.on=true; document.getElementById('axisView').classList.add('toggled'); }
+  }
 }
 document.getElementById('poseA').addEventListener('click',()=>recordPose('A'));
 document.getElementById('poseB').addEventListener('click',()=>recordPose('B'));
@@ -2734,7 +2788,7 @@ document.getElementById('saveBtn').addEventListener('click',()=>{
     image:ic.toDataURL('image/jpeg',.9),
     mask:maskCanvas?maskCanvas.toDataURL('image/png'):null,
     marks:markCv.map(cv=>cv?cv.toDataURL('image/png'):null),
-    markInfo,meshDensity,bgMode,bgColor,
+    markInfo,meshDensity,bgMode,bgColor,heightBoost,
     auto:{pattern:auto.pattern,dist:auto.dist,period:auto.period},
     autoZoom:{on:autoZoom.on,amt:autoZoom.amt,period:autoZoom.period},
     pullLoops:pullLoops.map(pl=>({axImg:pl.axImg,ayImg:pl.ayImg,bxImg:pl.bxImg,byImg:pl.byImg,phase:pl.phase})),
@@ -2786,6 +2840,9 @@ document.getElementById('projInput').addEventListener('change',e=>{
               refreshMarkCache();
               markInfo=(proj.markInfo||markInfo).map(mi=>Object.assign({swayMult:1},mi));
               meshDensity=proj.meshDensity||1;
+              heightBoost=proj.heightBoost||0;
+              document.getElementById('heightBoost').value=Math.round(heightBoost*100);
+              document.getElementById('heightBoostOut').textContent=(heightBoost>0?'+':'')+heightBoost.toFixed(2);
               bgMode=proj.bgMode||'dark';bgColor=proj.bgColor||'#0E1220';
               document.getElementById('bgMode').value=bgMode;
               document.getElementById('bgColor').value=bgColor;
