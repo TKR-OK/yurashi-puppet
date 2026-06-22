@@ -11,6 +11,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation@1.0.2/dist/body-segmentation.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-landmarks-detection@1.0.5/dist/face-landmarks-detection.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/depth-estimation@0.0.5/dist/depth-estimation.min.js"></script>
 <style>
   :root{
     --panel:#161C2Eee; --panel-2:#1D2438; --line:#2A3350;
@@ -172,6 +174,7 @@
       濃さ<input type="range" id="markOpacity" min="5" max="100" value="35"><output id="markOpacityOut" class="mini">0.35</output>
       <span class="mini">重ね塗りで濃く</span>
       <button id="blurMarksBtn" title="台形をなだらかな山型にする(押すたびになめらかに)">〰️ ぼかし</button>
+      <button id="depthHeightBtn" title="AIで画像の奥行きを推定し、高さ(立体)に自動変換する">🧊 AI深度→高さ</button>
       <div class="slider-line"><label>高さ全体</label><input type="range" id="heightBoost" min="-100" max="100" value="0"><span></span><output id="heightBoostOut">±0</output></div>
     </div>
     <div class="subbar" id="sub-bone">
@@ -338,6 +341,7 @@ let poseRot={A:null,B:null}; // ポーズA/Bに紐づく軸回転角(擬似3Dア
 let heightDrag=null;
 let sensorOn=false;
 let model=null, segmenter=null, poseDetector=null, posesCache=[];
+let depthEstimator=null, depthData=null, depthW=0, depthH=0; // AI深度マップ(高さ生成用)
 let meshDensity=1.0;
 let appMode='edit', tool='grab';
 let view={s:1,x:0,y:0};
@@ -438,7 +442,7 @@ function initImage(img){
   maskCanvas=null; tintedMask=null;
   markCv=MARK_COLORS.map(()=>{const c=document.createElement('canvas');c.width=editW;c.height=editH;return c;});
   refreshMarkCache();
-  defs=[]; posesCache=[]; undoStack=[]; pullLoops=[]; pullTimelineSec=0; pullTimelineScrub=false;
+  defs=[]; posesCache=[]; undoStack=[]; pullLoops=[]; pullTimelineSec=0; pullTimelineScrub=false; depthData=null;
   fitView();
   clearWorldUI();
   document.getElementById('stageHint').style.display='none';
@@ -692,10 +696,18 @@ function vertexMultOf(def,imgPt,refDist){
     swayF*=1+(markInfo[2].swayMult-1)*aC;
     swayDir = 1 - 2*aC; // a=0→+1, a=0.5→0, a=1→-1(完全逆転)
   }
-  // 【最小構成】高さ(height): 塗った濃さの合計を「山の盛り上がり」とみなす。
-  // 高い頂点ほど後段で揺れが増幅され、重力で山頂が一番動く挙動になる。
-  // heightBoostは「塗った部分全体」をスケールする(-1で実質0、0で等倍、+1で2倍)。塗っていない場所は常に0のまま。
-  const rawH=aA*0.7 + aB*1.0 + aC*0.7;
+  // 高さ(height): マーキング濃度 + AI深度マップ(あれば)を合成。
+  // 高い頂点ほど後段で揺れが増幅され、重力で山頂が一番動く。
+  const rawMarkH=aA*0.7 + aB*1.0 + aC*0.7;
+  let depthH2=0;
+  if(depthData){
+    // imgPt(画像座標)→深度マップ座標でサンプリング
+    const dx=Math.min(depthW-1,Math.max(0,Math.round(imgPt.x/imgW*(depthW-1))));
+    const dy=Math.min(depthH-1,Math.max(0,Math.round(imgPt.y/imgH*(depthH-1))));
+    depthH2=depthData[dy*depthW+dx]; // 0..1に正規化済み
+  }
+  // 深度とマーキングの高い方を採用(深度で大枠の立体、マーキングで局所的な盛り上げ)
+  const rawH=Math.max(rawMarkH, depthH2);
   const height=Math.min(1, Math.max(0, rawH*(1+heightBoost)));
   return {
     m:Math.min(Math.max(m,.08),5),
@@ -1261,6 +1273,36 @@ document.getElementById('markOpacity').addEventListener('input',e=>{
   document.getElementById('markOpacityOut').textContent=(e.target.value/100).toFixed(2);
 });
 document.getElementById('blurMarksBtn').addEventListener('click',()=>{ blurMarks(8); });
+document.getElementById('depthHeightBtn').addEventListener('click',runDepthToHeight);
+async function runDepthToHeight(){
+  if(!srcImg){ setStatus('先に画像を読み込んでください。',true); return; }
+  try{
+    if(typeof depthEstimation==='undefined'){ setStatus('深度推定ライブラリが読み込まれていません。',true); return; }
+    if(!depthEstimator){
+      setStatus('深度推定モデルを読み込み中(初回のみ・少し時間がかかります)…',false,true);
+      depthEstimator=await depthEstimation.createEstimator(depthEstimation.SupportedModels.ARPortraitDepth);
+    }
+    setStatus('AIで奥行きを推定中…',false,true);
+    const depthMap=await depthEstimator.estimateDepth(srcImg,{minDepth:0,maxDepth:1});
+    const arr=await depthMap.toArray(); // 2次元配列 [h][w] の深度値(0..1, 小さいほど手前)
+    depthH=arr.length; depthW=arr[0].length;
+    // 正規化 + 反転(手前=高い山にする)。min-maxで引き伸ばしてコントラストを上げる
+    let mn=Infinity,mx=-Infinity;
+    for(let y=0;y<depthH;y++)for(let x=0;x<depthW;x++){ const v=arr[y][x]; if(v<mn)mn=v; if(v>mx)mx=v; }
+    const range=Math.max(1e-6,mx-mn);
+    depthData=new Float32Array(depthW*depthH);
+    for(let y=0;y<depthH;y++)for(let x=0;x<depthW;x++){
+      const norm=(arr[y][x]-mn)/range; // 0..1
+      depthData[y*depthW+x]=1-norm;    // 手前(近い=値小)を高さ大に
+    }
+    if(depthMap.dispose) depthMap.dispose();
+    buildAll();
+    setStatus('AI深度を高さに変換しました。🔄軸回転で立体を確認できます。「高さ全体」スライダーで強弱を調整、🖌マーキングで局所的に盛り足せます。');
+  }catch(err){
+    console.warn('depth failed',err);
+    setStatus('深度推定に失敗しました(人物が写った画像が必要です)。',true);
+  }
+}
 document.getElementById('heightBoost').addEventListener('input',e=>{
   heightBoost=e.target.value/100;
   document.getElementById('heightBoostOut').textContent=(heightBoost>0?'+':'')+heightBoost.toFixed(2);
