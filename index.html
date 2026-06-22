@@ -167,14 +167,15 @@
     </div>
     <div class="subbar" id="sub-mark">
       <select id="markSel">
-        <option value="0">🟥 A 土台(硬い)</option><option value="1">🟧 B 可動部品(柔)</option><option value="2">🟪 C 揺れ反転</option>
+        <option value="0">🟥 A 土台(硬い)</option><option value="1">🟧 B 可動部品(柔)</option><option value="2">🟪 C 揺れ反転</option><option value="3">⬜ 高さ塗り(揺れ幅)</option>
       </select>
       <button id="markAdd" class="toggled">吹く</button><button id="markErase">消す</button>
       ブラシ<input type="range" id="markBrush" min="10" max="160" value="50">
       濃さ<input type="range" id="markOpacity" min="5" max="100" value="35"><output id="markOpacityOut" class="mini">0.35</output>
       <span class="mini">重ね塗りで濃く</span>
-      <button id="blurMarksBtn" title="台形をなだらかな山型にする(押すたびになめらかに)">〰️ ぼかし</button>
-      <button id="depthHeightBtn" title="AIで画像の奥行きを推定し、高さ(立体)に自動変換する">🧊 AI深度→高さ</button>
+      <button id="blurMarksBtn" title="高さ塗りをなだらかな山型にする(押すたびになめらかに)">〰️ ぼかし</button>
+      <button id="depthHeightBtn" title="AIで深度推定→高さ塗り(⬜)レイヤーに転写。その後ブラシで塗り足しや消しが可能">🧊 AI深度転写</button>
+      <button id="depthViewBtn" title="推定した深度マップを確認(もう一度押すと消す)">👁 深度確認</button>
       <div class="slider-line"><label>高さ全体</label><input type="range" id="heightBoost" min="-100" max="100" value="0"><span></span><output id="heightBoostOut">±0</output></div>
     </div>
     <div class="subbar" id="sub-bone">
@@ -214,7 +215,7 @@
       <span class="mini">色</span><input type="color" id="bgColor" value="#0E1220">
       <label class="btn" for="bgImgInput" style="font-size:11px;padding:5px 8px;">🖼 背景画像</label>
       <input type="file" id="bgImgInput" accept="image/*">
-      <span class="mini">密度</span><input type="range" id="densitySlider" min="50" max="300" value="100"><output id="densityOut" class="mini">1.0×</output>
+      <span class="mini">密度</span><input type="range" id="densitySlider" min="50" max="400" value="100"><output id="densityOut" class="mini">1.0×</output>
       <button id="expandBtn">⬆ 余白+10%</button>
       <label class="pill" style="cursor:pointer;"><input type="checkbox" id="trimMesh"> ✂️ マスク形状で切り抜く(輪郭の外を消す)</label>
     </div>
@@ -306,8 +307,8 @@ const BONE_PAIRS = [
   ['left_hip','left_knee'],['left_knee','left_ankle'],
   ['right_hip','right_knee'],['right_knee','right_ankle'],
 ];
-const MARK_COLORS = ['#FF5577','#FFB454','#A78BFA'];
-const MARK_NAMES = ['A(硬く重く)','B(大きく揺らす)','C(自由)'];
+const MARK_COLORS = ['#FF5577','#FFB454','#A78BFA','#FFFFFF']; // [3]=高さ塗り(白=アルファ値が高さに対応)
+const MARK_NAMES = ['A(硬く重く)','B(大きく揺らす)','C(揺れ反転)','高さ塗り'];
 const EDIT_RES = 1280;
 const INERTIA_K = 1.3e-6;
 
@@ -324,7 +325,7 @@ const panel=document.getElementById('panel');
 let srcImg=null, imgW=0, imgH=0, worldK=1, worldW=0, worldH=0;
 let editW=0, editH=0;
 let maskCanvas=null, tintedMask=null;
-let markCv=[null,null,null], markData=[null,null,null];
+let markCv=[null,null,null,null], markData=[null,null,null,null]; // [0]=A硬,[1]=B柔,[2]=C反転,[3]=高さ専用
 let markInfo=[
   {stiffMult:2.4, massMult:1.6, swayMult:0.6},
   {stiffMult:0.30, massMult:0.5, swayMult:3.2},
@@ -440,7 +441,9 @@ function initImage(img){
   const es=Math.min(EDIT_RES/Math.max(imgW,imgH),1);
   editW=Math.round(imgW*es); editH=Math.round(imgH*es);
   maskCanvas=null; tintedMask=null;
-  markCv=MARK_COLORS.map(()=>{const c=document.createElement('canvas');c.width=editW;c.height=editH;return c;});
+  // markCv: A(0)/B(1)/C(2)=物理特性、3=高さ専用。4レイヤー固定
+  markCv=Array.from({length:4},()=>{ const c=document.createElement('canvas'); c.width=editW; c.height=editH; return c; });
+  markData=[null,null,null,null];
   refreshMarkCache();
   defs=[]; posesCache=[]; undoStack=[]; pullLoops=[]; pullTimelineSec=0; pullTimelineScrub=false; depthData=null;
   fitView();
@@ -696,18 +699,10 @@ function vertexMultOf(def,imgPt,refDist){
     swayF*=1+(markInfo[2].swayMult-1)*aC;
     swayDir = 1 - 2*aC; // a=0→+1, a=0.5→0, a=1→-1(完全逆転)
   }
-  // 高さ(height): マーキング濃度 + AI深度マップ(あれば)を合成。
-  // 高い頂点ほど後段で揺れが増幅され、重力で山頂が一番動く。
-  const rawMarkH=aA*0.7 + aB*1.0 + aC*0.7;
-  let depthH2=0;
-  if(depthData){
-    // imgPt(画像座標)→深度マップ座標でサンプリング
-    const dx=Math.min(depthW-1,Math.max(0,Math.round(imgPt.x/imgW*(depthW-1))));
-    const dy=Math.min(depthH-1,Math.max(0,Math.round(imgPt.y/imgH*(depthH-1))));
-    depthH2=depthData[dy*depthW+dx]; // 0..1に正規化済み
-  }
-  // 深度とマーキングの高い方を採用(深度で大枠の立体、マーキングで局所的な盛り上げ)
-  const rawH=Math.max(rawMarkH, depthH2);
+  // 高さ(height): 高さ塗りキャンバス(markCv[3])のみから取る。
+  // マーキングA/B/Cは硬さ・重さ・揺れのみ担当し高さには関与しない。
+  // AI深度は「深度→高さ転写」ボタンでmarkCv[3]に書き込んでから使う。
+  const rawH=markAlpha(imgPt, 3); // インデックス3=高さ専用レイヤー
   const height=Math.min(1, Math.max(0, rawH*(1+heightBoost)));
   return {
     m:Math.min(Math.max(m,.08),5),
@@ -739,9 +734,9 @@ function buildLayer(def){
     lctx.globalCompositeOperation='source-over';
   }
 
-  let cols=Math.max(2,Math.min(20,Math.round(w/70*meshDensity)));
-  let rows=Math.max(3,Math.min(28,Math.round(h/55*meshDensity)));
-  while((cols+1)*(rows+1)>420){ if(rows>=cols)rows--; else cols--; }
+  let cols=Math.max(2,Math.min(30,Math.round(w/50*meshDensity)));
+  let rows=Math.max(3,Math.min(40,Math.round(h/40*meshDensity)));
+  while((cols+1)*(rows+1)>600){ if(rows>=cols)rows--; else cols--; }
   const cw=w/cols, ch=h/rows;
   const radius=Math.max(3,Math.min(cw,ch)*0.30);
 
@@ -1274,33 +1269,88 @@ document.getElementById('markOpacity').addEventListener('input',e=>{
 });
 document.getElementById('blurMarksBtn').addEventListener('click',()=>{ blurMarks(8); });
 document.getElementById('depthHeightBtn').addEventListener('click',runDepthToHeight);
+let depthViewOn=false;
+document.getElementById('depthViewBtn').addEventListener('click',()=>{
+  if(!depthData){ setStatus('まず「🧊 AI深度→高さ」を実行してください。',true); return; }
+  depthViewOn=!depthViewOn;
+  document.getElementById('depthViewBtn').classList.toggle('toggled',depthViewOn);
+  setStatus(depthViewOn?'深度マップを表示中(明=手前、暗=奥)。もう一度押すと消します。':'深度マップ表示を終了しました。');
+});
 async function runDepthToHeight(){
   if(!srcImg){ setStatus('先に画像を読み込んでください。',true); return; }
   try{
     if(typeof depthEstimation==='undefined'){ setStatus('深度推定ライブラリが読み込まれていません。',true); return; }
     if(!depthEstimator){
-      setStatus('深度推定モデルを読み込み中(初回のみ・少し時間がかかります)…',false,true);
+      setStatus('深度推定モデルを読み込み中(初回のみ)…',false,true);
       depthEstimator=await depthEstimation.createEstimator(depthEstimation.SupportedModels.ARPortraitDepth);
     }
     setStatus('AIで奥行きを推定中…',false,true);
     const depthMap=await depthEstimator.estimateDepth(srcImg,{minDepth:0,maxDepth:1});
-    const arr=await depthMap.toArray(); // 2次元配列 [h][w] の深度値(0..1, 小さいほど手前)
-    depthH=arr.length; depthW=arr[0].length;
-    // 正規化 + 反転(手前=高い山にする)。min-maxで引き伸ばしてコントラストを上げる
-    let mn=Infinity,mx=-Infinity;
-    for(let y=0;y<depthH;y++)for(let x=0;x<depthW;x++){ const v=arr[y][x]; if(v<mn)mn=v; if(v>mx)mx=v; }
-    const range=Math.max(1e-6,mx-mn);
-    depthData=new Float32Array(depthW*depthH);
-    for(let y=0;y<depthH;y++)for(let x=0;x<depthW;x++){
-      const norm=(arr[y][x]-mn)/range; // 0..1
-      depthData[y*depthW+x]=1-norm;    // 手前(近い=値小)を高さ大に
-    }
+    // toArray()は2次元 [row][col] の Float32Array。ARPortraitDepthは大きい値=手前
+    const arr=await depthMap.toArray();
     if(depthMap.dispose) depthMap.dispose();
+
+    const dH=arr.length, dW=arr[0] ? arr[0].length : 0;
+    if(!dH||!dW){ setStatus('深度マップの取得に失敗しました。',true); return; }
+    depthH=dH; depthW=dW;
+
+    // マスク情報取得(マスクがあれば範囲外を0にする)
+    const maskCtx=maskCanvas?maskCanvas.getContext('2d'):null;
+    const maskImg=maskCtx?maskCtx.getImageData(0,0,maskCanvas.width,maskCanvas.height):null;
+
+    // マスク範囲内のmin-maxを計算してコントラストを最大化
+    let mn=Infinity, mx2=-Infinity;
+    for(let y=0;y<dH;y++){
+      for(let x=0;x<dW;x++){
+        if(maskImg){
+          const sx=Math.round(x/dW*maskImg.width), sy=Math.round(y/dH*maskImg.height);
+          if(maskImg.data[(sy*maskImg.width+sx)*4+3]<20) continue;
+        }
+        const v=arr[y][x];
+        if(v<mn) mn=v;
+        if(v>mx2) mx2=v;
+      }
+    }
+    if(!isFinite(mn)){ mn=0; mx2=1; } // マスクなし=全域
+    const range=Math.max(1e-6, mx2-mn);
+
+    // depthData: 可視化用(0=奥, 1=手前)
+    depthData=new Float32Array(dW*dH);
+    for(let y=0;y<dH;y++)for(let x=0;x<dW;x++){
+      if(maskImg){
+        const sx=Math.round(x/dW*maskImg.width), sy=Math.round(y/dH*maskImg.height);
+        if(maskImg.data[(sy*maskImg.width+sx)*4+3]<20){ depthData[y*dW+x]=0; continue; }
+      }
+      depthData[y*dW+x]=Math.max(0,Math.min(1,(arr[y][x]-mn)/range));
+    }
+
+    // ★ markCv[3](高さ塗りレイヤー)に転写する
+    // 転写先は editW×editH のキャンバス(マーキングと同じサイズ)
+    if(!markCv[3]){
+      markCv[3]=document.createElement('canvas');
+      markCv[3].width=editW; markCv[3].height=editH;
+    }
+    const hc=markCv[3].getContext('2d');
+    hc.clearRect(0,0,editW,editH);
+    // depthDataをeditWxeditHに拡大して書き込む
+    // アルファ値=深度値*255(濃度として使う)、RGBは白
+    const hId=hc.createImageData(editW,editH);
+    for(let y=0;y<editH;y++){
+      for(let x=0;x<editW;x++){
+        const sx=Math.round(x/editW*(dW-1)), sy=Math.round(y/editH*(dH-1));
+        const v=Math.round(depthData[sy*dW+sx]*255);
+        const idx=(y*editW+x)*4;
+        hId.data[idx]=255; hId.data[idx+1]=255; hId.data[idx+2]=255; hId.data[idx+3]=v;
+      }
+    }
+    hc.putImageData(hId,0,0);
+
+    refreshMarkCache();
     buildAll();
-    setStatus('AI深度を高さに変換しました。🔄軸回転で立体を確認できます。「高さ全体」スライダーで強弱を調整、🖌マーキングで局所的に盛り足せます。');
+    setStatus('AI深度を⬜高さ塗りレイヤーに転写しました。マーキングの「⬜ 高さ塗り」を選んでブラシで塗り足しや消しができます。🔄軸回転で立体を確認してください。');
   }catch(err){
     console.warn('depth failed',err);
-    setStatus('深度推定に失敗しました(人物が写った画像が必要です)。',true);
+    setStatus('深度推定に失敗しました: '+err.message,true);
   }
 }
 document.getElementById('heightBoost').addEventListener('input',e=>{
@@ -2204,7 +2254,7 @@ function loop(t){
     if(tintedMask){ctx.globalAlpha=al;ctx.drawImage(tintedMask,0,0,worldW,worldH);ctx.globalAlpha=1;}
   }
   if(confirm||tool==='mark'){
-    markCv.forEach(cv=>{if(cv){ctx.globalAlpha=.65;ctx.drawImage(cv,0,0,worldW,worldH);}});
+    markCv.slice(0,3).forEach(cv=>{if(cv){ctx.globalAlpha=.65;ctx.drawImage(cv,0,0,worldW,worldH);}});
     ctx.globalAlpha=1;
   }
 
@@ -2336,6 +2386,19 @@ function loop(t){
   }
 
   ctx.setTransform(1,0,0,1,0,0);
+  // 深度マップオーバーレイ(👁深度確認ボタンON時)
+  if(depthViewOn&&markCv[3]&&layers.length){
+    const L=layers[0];
+    if(L.bboxImg){
+      const {ix,iy,iw,ihh}=L.bboxImg;
+      ctx.save();
+      ctx.globalAlpha=0.65;
+      ctx.drawImage(markCv[3],
+        ix*worldK*view.s+view.x, iy*worldK*view.s+view.y,
+        iw*worldK*view.s, ihh*worldK*view.s);
+      ctx.restore();
+    }
+  }
   drawNeedle();
   }catch(err){ console.error('draw error',err); }
   requestAnimationFrame(loop);
